@@ -48,59 +48,37 @@ function pushOut(pos, box, radius) {
   else pos.z = box.z + box.hz + radius;
 }
 
-function Player({ playerRef, paint }) {
-  const body = useRef();
-  const head = useRef();
-  const [assets, setAssets] = useState(null);
+function Player({ playerRef, assetsRef }) {
+  if (!assetsRef.current) {
+    assetsRef.current = { body: makePaintAsset(), head: makePaintAsset() };
+  }
+  const assets = assetsRef.current;
 
   useEffect(() => {
-    const next = { body: makePaintAsset(), head: makePaintAsset() };
-    setAssets(next);
-    return () => { next.body.texture.dispose(); next.head.texture.dispose(); };
-  }, []);
-
-  const dab = (mesh, uv) => {
-    if (!paint.active || !assets || !uv) return;
-    const target = mesh === body.current ? assets.body : assets.head;
-    const { canvas, ctx, texture } = target;
-    const x = THREE.MathUtils.clamp(uv.x, 0, 1) * canvas.width;
-    const y = (1 - THREE.MathUtils.clamp(uv.y, 0, 1)) * canvas.height;
-    const radius = paint.eraser ? paint.size * 1.8 : paint.size;
-    ctx.save();
-    ctx.globalAlpha = paint.eraser ? 1 : 0.92;
-    ctx.fillStyle = paint.eraser ? BASE_COLOR : paint.color;
-    ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill(); ctx.restore();
-    texture.needsUpdate = true;
-    paint.onDab();
-  };
-
-  useEffect(() => {
-    const up = () => { paint.dragging.current = false; };
-    window.addEventListener('pointerup', up);
-    return () => window.removeEventListener('pointerup', up);
-  }, [paint.dragging]);
-
-  const down = (e, mesh) => {
-    if (!paint.active) return;
-    e.stopPropagation(); paint.dragging.current = true; dab(mesh, e.uv);
-  };
-  const move = (e, mesh) => {
-    if (!paint.active || !paint.dragging.current) return;
-    e.stopPropagation(); dab(mesh, e.uv);
-  };
+    return () => {
+      assets.body.texture.dispose();
+      assets.head.texture.dispose();
+    };
+  }, [assets]);
 
   return (
-    <group ref={playerRef} position={[0,0,4]}>
-      <mesh ref={body} castShadow position={[0,0.72,0]} onPointerDown={e => down(e, body.current)} onPointerMove={e => move(e, body.current)}>
-        <capsuleGeometry args={[0.38,0.8,16,32]} />
-        <meshStandardMaterial map={assets?.body.texture || null} color="#ffffff" roughness={0.82} />
+    <group ref={playerRef} position={[0, 0, 4]}>
+      <mesh userData={{ paintTarget: 'body' }} castShadow position={[0, 0.72, 0]}>
+        <capsuleGeometry args={[0.38, 0.8, 16, 32]} />
+        <meshStandardMaterial map={assets.body.texture} color="#ffffff" roughness={0.82} />
       </mesh>
-      <mesh ref={head} castShadow position={[0,1.52,0]} onPointerDown={e => down(e, head.current)} onPointerMove={e => move(e, head.current)}>
-        <sphereGeometry args={[0.38,32,24]} />
-        <meshStandardMaterial map={assets?.head.texture || null} color="#ffffff" roughness={0.82} />
+      <mesh userData={{ paintTarget: 'head' }} castShadow position={[0, 1.52, 0]}>
+        <sphereGeometry args={[0.38, 32, 24]} />
+        <meshStandardMaterial map={assets.head.texture} color="#ffffff" roughness={0.82} />
       </mesh>
-      <mesh position={[-0.14,1.6,-0.34]}><sphereGeometry args={[0.075,12,12]} /><meshStandardMaterial color="#111111" /></mesh>
-      <mesh position={[0.14,1.6,-0.34]}><sphereGeometry args={[0.075,12,12]} /><meshStandardMaterial color="#111111" /></mesh>
+      <mesh position={[-0.14, 1.6, -0.34]}>
+        <sphereGeometry args={[0.075, 12, 12]} />
+        <meshStandardMaterial color="#111111" />
+      </mesh>
+      <mesh position={[0.14, 1.6, -0.34]}>
+        <sphereGeometry args={[0.075, 12, 12]} />
+        <meshStandardMaterial color="#111111" />
+      </mesh>
     </group>
   );
 }
@@ -110,7 +88,11 @@ function Prop({ position, scale, color }) {
 }
 
 function Room({ onPick }) {
-  const pick = e => { e.stopPropagation(); const c=e.object.material?.color; if(c) onPick('#'+c.getHexString()); };
+  const pick = e => {
+    e.stopPropagation();
+    const c = e.object.material?.color;
+    if (c) onPick('#' + c.getHexString());
+  };
   return <group>
     <mesh receiveShadow rotation={[-Math.PI/2,0,0]} userData={{camoSurface:true}} onClick={pick}><planeGeometry args={[24,20]} /><meshStandardMaterial color="#6b6256" roughness={1}/></mesh>
     <mesh receiveShadow position={[0,4,-10]} userData={{camoSurface:true}} onClick={pick}><boxGeometry args={[24,8,.5]}/><meshStandardMaterial color="#b7a98e" roughness={.95}/></mesh>
@@ -125,28 +107,163 @@ function Room({ onPick }) {
 
 function Controller({ playerRef, paintMode, setLocked, setSample }) {
   const { camera, gl, scene } = useThree();
-  const keys=useRef({}), yaw=useRef(0), pitch=useRef(.22);
-  const smooth=useRef(new THREE.Vector3(0,3.2,8)), target=useRef(new THREE.Vector3()), look=useRef(new THREE.Vector3());
-  const ray=useMemo(()=>new THREE.Raycaster(),[]), center=useMemo(()=>new THREE.Vector2(0,0),[]);
-  const sample=()=>{
-    ray.setFromCamera(center,camera);
-    const hits=ray.intersectObjects(scene.children,true);
-    const hit=hits.find(h=>h.object.userData.camoSurface);
-    if(hit?.object.material?.color) setSample('#'+hit.object.material.color.getHexString());
+  const keys = useRef({}), yaw = useRef(0), pitch = useRef(.22);
+  const smooth = useRef(new THREE.Vector3(0,3.2,8)), target = useRef(new THREE.Vector3()), look = useRef(new THREE.Vector3());
+  const ray = useMemo(() => new THREE.Raycaster(), []), center = useMemo(() => new THREE.Vector2(0,0), []);
+
+  const sample = () => {
+    ray.setFromCamera(center, camera);
+    const hits = ray.intersectObjects(scene.children, true);
+    const hit = hits.find(h => h.object.userData.camoSurface);
+    if (hit?.object.material?.color) setSample('#' + hit.object.material.color.getHexString());
   };
-  useEffect(()=>{
-    const down=e=>{ keys.current[e.code]=true; if(['KeyW','KeyA','KeyS','KeyD'].includes(e.code)) e.preventDefault(); if(e.code==='KeyP'){document.exitPointerLock?.();} if(e.code==='KeyE') sample(); };
-    const up=e=>{keys.current[e.code]=false;};
-    const move=e=>{if(paintMode||document.pointerLockElement!==gl.domElement)return; yaw.current-=e.movementX*.0022; pitch.current=THREE.MathUtils.clamp(pitch.current-e.movementY*.0017,-.15,.72);};
-    const lock=()=>setLocked(document.pointerLockElement===gl.domElement);
-    window.addEventListener('keydown',down);window.addEventListener('keyup',up);document.addEventListener('mousemove',move);document.addEventListener('pointerlockchange',lock);
-    return()=>{window.removeEventListener('keydown',down);window.removeEventListener('keyup',up);document.removeEventListener('mousemove',move);document.removeEventListener('pointerlockchange',lock);};
-  },[gl,paintMode,setLocked]);
-  useEffect(()=>{const click=()=>{if(!paintMode&&document.pointerLockElement!==gl.domElement)gl.domElement.requestPointerLock();};gl.domElement.addEventListener('click',click);return()=>gl.domElement.removeEventListener('click',click);},[gl,paintMode]);
-  useFrame((_,dt)=>{
-    const p=playerRef.current;if(!p)return;
-    if(!paintMode){const move=new THREE.Vector3(), f=new THREE.Vector3(-Math.sin(yaw.current),0,-Math.cos(yaw.current)), r=new THREE.Vector3(Math.cos(yaw.current),0,-Math.sin(yaw.current));if(keys.current.KeyW)move.add(f);if(keys.current.KeyS)move.sub(f);if(keys.current.KeyD)move.add(r);if(keys.current.KeyA)move.sub(r);if(move.lengthSq()){move.normalize().multiplyScalar(SPEED*Math.min(dt,.05));p.position.add(move);p.position.x=THREE.MathUtils.clamp(p.position.x,-11.25,11.25);p.position.z=THREE.MathUtils.clamp(p.position.z,-9.25,9.25);COLLIDERS.forEach(b=>pushOut(p.position,b,PLAYER_RADIUS));p.rotation.y=THREE.MathUtils.lerp(p.rotation.y,Math.atan2(move.x,move.z),.2);}}
-    const d=paintMode?4.2:5.2,h=paintMode?1.6:1.9,cp=Math.cos(pitch.current);target.current.set(p.position.x+Math.sin(yaw.current)*d*cp,p.position.y+h+Math.sin(pitch.current)*d,p.position.z+Math.cos(yaw.current)*d*cp);target.current.x=THREE.MathUtils.clamp(target.current.x,-10.8,10.8);target.current.z=THREE.MathUtils.clamp(target.current.z,-8.8,8.8);target.current.y=THREE.MathUtils.clamp(target.current.y,1.1,7.5);smooth.current.lerp(target.current,1-Math.pow(.001,dt));camera.position.copy(smooth.current);look.current.set(p.position.x,p.position.y+1.05,p.position.z);camera.lookAt(look.current);
+
+  useEffect(() => {
+    const down = e => {
+      keys.current[e.code] = true;
+      if (['KeyW','KeyA','KeyS','KeyD'].includes(e.code)) e.preventDefault();
+      if (e.code === 'KeyP') document.exitPointerLock?.();
+      if (e.code === 'KeyE') sample();
+    };
+    const up = e => { keys.current[e.code] = false; };
+    const move = e => {
+      if (paintMode || document.pointerLockElement !== gl.domElement) return;
+      yaw.current -= e.movementX * .0022;
+      pitch.current = THREE.MathUtils.clamp(pitch.current - e.movementY * .0017, -.15, .72);
+    };
+    const lock = () => setLocked(document.pointerLockElement === gl.domElement);
+    window.addEventListener('keydown',down); window.addEventListener('keyup',up);
+    document.addEventListener('mousemove',move); document.addEventListener('pointerlockchange',lock);
+    return () => {
+      window.removeEventListener('keydown',down); window.removeEventListener('keyup',up);
+      document.removeEventListener('mousemove',move); document.removeEventListener('pointerlockchange',lock);
+    };
+  }, [gl, paintMode, setLocked]);
+
+  useEffect(() => {
+    const click = () => {
+      if (!paintMode && document.pointerLockElement !== gl.domElement) gl.domElement.requestPointerLock();
+    };
+    gl.domElement.addEventListener('click',click);
+    return () => gl.domElement.removeEventListener('click',click);
+  }, [gl, paintMode]);
+
+  useFrame((_,dt) => {
+    const p = playerRef.current;
+    if (!p) return;
+    if (!paintMode) {
+      const move = new THREE.Vector3();
+      const f = new THREE.Vector3(-Math.sin(yaw.current),0,-Math.cos(yaw.current));
+      const r = new THREE.Vector3(Math.cos(yaw.current),0,-Math.sin(yaw.current));
+      if (keys.current.KeyW) move.add(f); if (keys.current.KeyS) move.sub(f);
+      if (keys.current.KeyD) move.add(r); if (keys.current.KeyA) move.sub(r);
+      if (move.lengthSq()) {
+        move.normalize().multiplyScalar(SPEED * Math.min(dt,.05));
+        p.position.add(move);
+        p.position.x = THREE.MathUtils.clamp(p.position.x,-11.25,11.25);
+        p.position.z = THREE.MathUtils.clamp(p.position.z,-9.25,9.25);
+        COLLIDERS.forEach(b => pushOut(p.position,b,PLAYER_RADIUS));
+        p.rotation.y = THREE.MathUtils.lerp(p.rotation.y,Math.atan2(move.x,move.z),.2);
+      }
+    }
+    const d = paintMode ? 4.2 : 5.2, h = paintMode ? 1.6 : 1.9, cp = Math.cos(pitch.current);
+    target.current.set(p.position.x+Math.sin(yaw.current)*d*cp,p.position.y+h+Math.sin(pitch.current)*d,p.position.z+Math.cos(yaw.current)*d*cp);
+    target.current.x=THREE.MathUtils.clamp(target.current.x,-10.8,10.8);
+    target.current.z=THREE.MathUtils.clamp(target.current.z,-8.8,8.8);
+    target.current.y=THREE.MathUtils.clamp(target.current.y,1.1,7.5);
+    smooth.current.lerp(target.current,1-Math.pow(.001,dt));
+    camera.position.copy(smooth.current);
+    look.current.set(p.position.x,p.position.y+1.05,p.position.z);
+    camera.lookAt(look.current);
+  });
+  return null;
+}
+
+// Painting is handled with a direct canvas raycast instead of relying on R3F
+// pointer events. This makes click-drag painting reliable even while the HUD
+// and paint controls are rendered over the WebGL canvas.
+function PaintController({ playerRef, assetsRef, paint }) {
+  const { camera, gl } = useThree();
+  const raycaster = useMemo(() => new THREE.Raycaster(), []);
+  const pointer = useMemo(() => new THREE.Vector2(), []);
+  const lastUV = useRef(null);
+
+  const paintAt = (event) => {
+    if (!paint.active || !assetsRef.current || !playerRef.current) return false;
+    const rect = gl.domElement.getBoundingClientRect();
+    pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObject(playerRef.current, true);
+    const hit = hits.find(h => h.object.userData.paintTarget && h.uv);
+    if (!hit) return false;
+
+    const asset = assetsRef.current[hit.object.userData.paintTarget];
+    if (!asset) return false;
+
+    const uv = hit.uv;
+    const x = THREE.MathUtils.clamp(uv.x,0,1) * asset.canvas.width;
+    const y = (1 - THREE.MathUtils.clamp(uv.y,0,1)) * asset.canvas.height;
+    const radius = paint.eraser ? paint.size * 1.8 : paint.size;
+
+    asset.ctx.save();
+    asset.ctx.globalAlpha = paint.eraser ? 1 : .95;
+    asset.ctx.fillStyle = paint.eraser ? BASE_COLOR : paint.color;
+    asset.ctx.beginPath();
+    asset.ctx.arc(x,y,radius,0,Math.PI*2);
+    asset.ctx.fill();
+    asset.ctx.restore();
+
+    // Fill the gap between mouse events so fast dragging creates a continuous stroke.
+    if (lastUV.current && lastUV.current.target === asset) {
+      const lx = lastUV.current.x, ly = lastUV.current.y;
+      const dx = x-lx, dy = y-ly, distance = Math.hypot(dx,dy);
+      const steps = Math.min(80, Math.ceil(distance / Math.max(2,radius*.45)));
+      for (let i=1;i<steps;i++) {
+        const t=i/steps;
+        asset.ctx.beginPath();
+        asset.ctx.arc(lx+dx*t,ly+dy*t,radius,0,Math.PI*2);
+        asset.ctx.fill();
+      }
+    }
+    asset.texture.needsUpdate = true;
+    lastUV.current = { target:asset, x, y };
+    paint.onDab();
+    return true;
+  };
+
+  useEffect(() => {
+    const down = e => {
+      if (!paint.active) return;
+      if (e.button !== 0) return;
+      const hit = paintAt(e);
+      if (hit) {
+        e.preventDefault();
+        e.stopPropagation();
+        paint.dragging.current = true;
+        gl.domElement.setPointerCapture?.(e.pointerId);
+      }
+    };
+    const move = e => {
+      if (!paint.active || !paint.dragging.current) return;
+      paintAt(e);
+      e.preventDefault();
+    };
+    const up = e => {
+      paint.dragging.current = false;
+      lastUV.current = null;
+      try { gl.domElement.releasePointerCapture?.(e.pointerId); } catch {}
+    };
+    gl.domElement.addEventListener('pointerdown',down);
+    gl.domElement.addEventListener('pointermove',move);
+    gl.domElement.addEventListener('pointerup',up);
+    gl.domElement.addEventListener('pointercancel',up);
+    return () => {
+      gl.domElement.removeEventListener('pointerdown',down);
+      gl.domElement.removeEventListener('pointermove',move);
+      gl.domElement.removeEventListener('pointerup',up);
+      gl.domElement.removeEventListener('pointercancel',up);
+    };
   });
   return null;
 }
@@ -167,16 +284,25 @@ function PaintUI({ active,setActive,color,setColor,size,setSize,eraser,setEraser
 }
 
 function App(){
-  const playerRef=useRef(),dragging=useRef(false);
+  const playerRef=useRef();
+  const assetsRef=useRef(null);
+  const dragging=useRef(false);
   const [locked,setLocked]=useState(false),[paintMode,setPaintMode]=useState(false),[color,setColor]=useState('#9c724e'),[size,setSize]=useState(18),[eraser,setEraser]=useState(false),[sampleColor,setSampleColor]=useState(BASE_COLOR),[count,setCount]=useState(0);
   useEffect(()=>{if(paintMode)document.exitPointerLock?.();},[paintMode]);
   const paint=useMemo(()=>({active:paintMode,color,size,eraser,dragging,onDab:()=>setCount(v=>v+1)}),[paintMode,color,size,eraser]);
   return <div className={`game ${paintMode?'painting-mode':''}`}>
-    <Canvas shadows camera={{position:[0,3.2,9],fov:65,near:.1,far:100}} gl={{antialias:true}}><color attach="background" args={['#9ba7b1']}/><fog attach="fog" args={['#9ba7b1',18,55]}/><ambientLight intensity={1.8}/><directionalLight castShadow position={[6,12,5]} intensity={3} shadow-mapSize-width={2048} shadow-mapSize-height={2048}/><Sky sunPosition={[100,20,50]} turbidity={7} rayleigh={1.2}/><Room onPick={setSampleColor}/><Player playerRef={playerRef} paint={paint}/><Controller playerRef={playerRef} paintMode={paintMode} setLocked={setLocked} setSample={setSampleColor}/></Canvas>
+    <Canvas shadows camera={{position:[0,3.2,9],fov:65,near:.1,far:100}} gl={{antialias:true}}>
+      <color attach="background" args={['#9ba7b1']}/><fog attach="fog" args={['#9ba7b1',18,55]}/>
+      <ambientLight intensity={1.8}/><directionalLight castShadow position={[6,12,5]} intensity={3} shadow-mapSize-width={2048} shadow-mapSize-height={2048}/>
+      <Sky sunPosition={[100,20,50]} turbidity={7} rayleigh={1.2}/>
+      <Room onPick={setSampleColor}/><Player playerRef={playerRef} assetsRef={assetsRef}/>
+      <Controller playerRef={playerRef} paintMode={paintMode} setLocked={setLocked} setSample={setSampleColor}/>
+      <PaintController playerRef={playerRef} assetsRef={assetsRef} paint={paint}/>
+    </Canvas>
     <div className="hud"><div className="brand">HIDENSEEK <span>3D</span></div><div className="objective">TEST ROOM · 3D PAINT PROTOTYPE</div>
       {!paintMode&&!locked&&<div className="start-card"><div className="start-title">ENTER THE ROOM</div><div className="start-subtitle">Click anywhere to capture the mouse</div><div className="key-row"><span>W A S D</span> Move <span>MOUSE</span> Look <span>P</span> Paint</div></div>}
       {paintMode&&<div className="paint-instruction">PAINT MODE · DRAG YOUR BRUSH OVER THE 3D CHARACTER</div>}
-      {!paintMode&&locked&&<div className="camo-panel compact"><div className="camo-heading"><span>PAINT COVERAGE</span><strong>{Math.min(100,Math.round(count/2))}%</strong></div><div className="camo-bar"><div className="camo-fill style" style={{width:`${Math.min(100,Math.round(count/2))}%`}}/></div><div className="camo-status"><span className="sample-swatch" style={{background:sampleColor}}/><span>READY TO HIDE</span><span className="camo-help">P · PAINT</span></div></div>}
+      {!paintMode&&locked&&<div className="camo-panel compact"><div className="camo-heading"><span>PAINT COVERAGE</span><strong>{Math.min(100,Math.round(count/2))}%</strong></div><div className="camo-bar"><div className="camo-fill" style={{width:`${Math.min(100,Math.round(count/2))}%`}}/></div><div className="camo-status"><span className="sample-swatch" style={{background:sampleColor}}/><span>READY TO HIDE</span><span className="camo-help">P · PAINT</span></div></div>}
       {!paintMode&&<div className="controls"><b>WASD</b> move&nbsp;&nbsp; <b>MOUSE</b> look&nbsp;&nbsp; <b>P</b> paint&nbsp;&nbsp; <b>E</b> sample</div>}{!paintMode&&<div className="crosshair">+</div>}
     </div>
     <PaintUI active={paintMode} setActive={setPaintMode} color={color} setColor={setColor} size={size} setSize={setSize} eraser={eraser} setEraser={setEraser} sampleColor={sampleColor} setColorFromSurface={()=>setColor(sampleColor)}/>
