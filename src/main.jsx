@@ -1,24 +1,595 @@
-import React,{useEffect,useMemo,useRef,useState}from'react';
-import ReactDOM from'react-dom/client';
-import{Canvas,useFrame,useThree}from'@react-three/fiber';
-import{Environment,Sparkles,Float,Stars}from'@react-three/drei';
-import{CapsuleCollider,CuboidCollider,Physics,RigidBody}from'@react-three/rapier';
-import*as THREE from'three';
-import'./style.css';
+import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import ReactDOM from 'react-dom/client';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { Environment, Float, MeshReflectorMaterial, Sparkles, Stars, useGLTF } from '@react-three/drei';
+import { EffectComposer, Bloom, Noise, Vignette, SMAA } from '@react-three/postprocessing';
+import { CuboidCollider, CapsuleCollider, Physics, RigidBody } from '@react-three/rapier';
+import * as THREE from 'three';
+import './style.css';
 
-const cores=[[-18,1.4,-18],[-7,1.4,-21],[7,1.4,-18],[19,1.4,-12],[24,1.4,-2],[18,1.4,10],[7,1.4,19],[-6,1.4,21],[-18,1.4,17],[-24,1.4,7],[-24,1.4,-5],[-14,1.4,7]];
-const blocks=[[-13,1,-3,[4,2,2]],[-4,1.1,-13,[2.4,2.2,5]],[8,1.2,-5,[4.3,2.4,2.2]],[18,1,1,[2.4,2,5]],[7,1,12,[5,2,2]],[-8,1.35,10,[2.2,2.7,5]],[-18,1,2,[4,2,2]],[1,.8,20,[3,1.6,3]]];
-const drones=[[-14,5,-10],[12,5,-14],[23,5,5],[-19,5,12],[5,5,15]];
-const COLORS=['#69f5ff','#ffe36c','#ff6b8a','#8b7dff'];
-function Mat({c='#fff',e='#000',ei=0,r=.7,m=.05}){return <meshStandardMaterial color={c} emissive={e} emissiveIntensity={ei} roughness={r} metalness={m}/>}
-function Building({x,z,w,d,h,c}){return <group position={[x,h/2,z]}><mesh castShadow receiveShadow><boxGeometry args={[w,h,d]}/><Mat c={c} r={.82} m={.12}/></mesh>{Array.from({length:Math.max(3,Math.floor(w/2))}).map((_,i)=><mesh key={i} position={[-w/2+.45+i*(w-.9)/(Math.max(1,Math.floor(w/2)-1)),.8,d/2+.012]}><boxGeometry args={[.42,.5,.03]}/><Mat c="#223b53" e="#5cc7ff" ei={.3} r={.25} m={.25}/></mesh>)}</group>}
-function City(){const b=[[-29,-27,7,8,13],[-17,-29,6,7,9],[-6,-29,7,6,16],[10,-28,8,7,11],[24,-28,7,8,15],[-29,-16,7,7,10],[-28,-2,8,8,17],[29,-10,8,10,12],[-31,13,7,8,14],[27,16,8,9,18],[-27,27,9,6,11],[-14,29,7,8,15],[1,29,8,7,12],[16,29,9,8,17],[30,26,6,6,10]];return <><mesh rotation={[-Math.PI/2,0,0]} receiveShadow><planeGeometry args={[76,76]}/><Mat c="#131820" r={1}/></mesh>{b.map((v,i)=><Building key={i} x={v[0]} z={v[1]} w={v[2]} d={v[3]} h={v[4]} c={i%3?'#2b3441':'#222b39'}/>)}<mesh position={[0,.03,0]}><boxGeometry args={[62,.05,7]}/><Mat c="#30353d" r={1}/></mesh><mesh position={[0,.035,0]}><boxGeometry args={[7,.05,62]}/><Mat c="#30353d" r={1}/></mesh>{[-27,-18,-9,0,9,18,27].map(v=><React.Fragment key={v}><mesh position={[v,.06,0]}><boxGeometry args={[.08,.02,62]}/><Mat c="#b6a77c" e="#b6a77c" ei={.2}/></mesh><mesh position={[0,.06,v]}><boxGeometry args={[62,.02,.08]}/><Mat c="#b6a77c" e="#b6a77c" ei={.2}/></mesh></React.Fragment>)}</>}
-function StreetLight({p}){return <group position={p}><mesh position={[0,2,0]}><cylinderGeometry args={[.05,.07,4,10]}/><Mat c="#424a54" r={.35} m={.75}/></mesh><mesh position={[0,4,0]}><sphereGeometry args={[.16,16,12]}/><Mat c="#ffd98a" e="#ffb000" ei={4}/></mesh><pointLight position={[0,3.7,0]} intensity={14} distance={7} color="#ffd078"/></group>}
-function Obstacle({p,s}){return <RigidBody type="fixed" colliders="cuboid" friction={1}><mesh position={p} castShadow receiveShadow><boxGeometry args={s}/><Mat c="#485361" r={.72} m={.3}/></mesh></RigidBody>}
-function Core({p,taken,onTake}){const r=useRef();useFrame((s,d)=>{if(!r.current||taken)return;r.current.rotation.y+=d*2;r.current.position.y=p[1]+Math.sin(s.clock.elapsedTime*3+p[0])*.12});if(taken)return null;return <group ref={r} position={p} onClick={onTake}><Float speed={2} floatIntensity={.3}><mesh castShadow><icosahedronGeometry args={[.3,2]}/><Mat c="#b4fbff" e="#16dfff" ei={4} r={.2} m={.4}/></mesh></Float><pointLight intensity={7} distance={4} color="#17dfff"/></group>}
-function Drone({p,i,onHit}){const r=useRef();useFrame(s=>{if(!r.current)return;const t=s.clock.elapsedTime;r.current.position.set(p[0]+Math.sin(t*.7+i)*4,p[1]+Math.sin(t*1.4+i)*.7,p[2]+Math.cos(t*.6+i)*3);if(window.__srp){const q=window.__srp;if((q.x-r.current.position.x)**2+(q.z-r.current.position.z)**2<2.25&&Math.abs(q.y-r.current.position.y)<2)onHit()}});return <group ref={r} position={p}><mesh><sphereGeometry args={[.48,20,20]}/><Mat c="#ff4c67" e="#ff1436" ei={2.8} r={.2} m={.55}/></mesh>{[0,Math.PI/2,Math.PI,Math.PI*1.5].map(a=><mesh key={a} position={[Math.cos(a)*.72,0,Math.sin(a)*.72]}><boxGeometry args={[.5,.08,.08]}/><Mat c="#c9d2dc" r={.25} m={.85}/></mesh>)}<pointLight color="#ff2149" intensity={6} distance={4}/></group>}
-function Player({refBody}){return <RigidBody ref={refBody} position={[0,1.1,25]} colliders={false} enabledRotations={[false,false,false]} linearDamping={8}><CapsuleCollider args={[.52,.34]} friction={1}/><group><mesh position={[0,.58,0]} castShadow><capsuleGeometry args={[.34,.68,10,20]}/><Mat c="#edf5ff" r={.42} m={.15}/></mesh><mesh position={[0,1.43,0]} castShadow><sphereGeometry args={[.33,22,18]}/><Mat c="#d6e4f2" r={.35} m={.15}/></mesh><mesh position={[-.37,.6,0]} castShadow rotation={[0,0,-.12]}><capsuleGeometry args={[.095,.5,7,10]}/><Mat c="#9ab9d3" r={.5} m={.2}/></mesh><mesh position={[.37,.6,0]} castShadow rotation={[0,0,.12]}><capsuleGeometry args={[.095,.5,7,10]}/><Mat c="#9ab9d3" r={.5} m={.2}/></mesh><mesh position={[-.16,.02,0]} castShadow><capsuleGeometry args={[.11,.48,7,10]}/><Mat c="#7896af" r={.55} m={.15}/></mesh><mesh position={[.16,.02,0]} castShadow><capsuleGeometry args={[.11,.48,7,10]}/><Mat c="#7896af" r={.55} m={.15}/></mesh></group></RigidBody>}
-function Controller({body,run,onDash}){const{camera,gl}=useThree(),keys=useRef({}),yaw=useRef(0),pitch=useRef(.17),jump=useRef(false),dash=useRef(false);useEffect(()=>{const d=e=>{keys.current[e.code]=true;if(e.code==='Space'||e.code==='ShiftLeft'||e.code==='ShiftRight')e.preventDefault()},u=e=>keys.current[e.code]=false;window.addEventListener('keydown',d);window.addEventListener('keyup',u);return()=>{window.removeEventListener('keydown',d);window.removeEventListener('keyup',u)}},[]);useEffect(()=>{const c=gl.domElement,clk=()=>{if(run&&document.pointerLockElement!==c)c.requestPointerLock?.()},mm=e=>{if(run&&document.pointerLockElement===c){yaw.current-=e.movementX*.0026;pitch.current=THREE.MathUtils.clamp(pitch.current-e.movementY*.0019,-.55,.6)}};c.addEventListener('click',clk);document.addEventListener('mousemove',mm);return()=>{c.removeEventListener('click',clk);document.removeEventListener('mousemove',mm)}},[gl,run]);useFrame((_,dt)=>{if(!run||!body.current)return;const b=body.current,v=b.linvel(),m=new THREE.Vector3();if(keys.current.KeyW)m.z-=1;if(keys.current.KeyS)m.z+=1;if(keys.current.KeyA)m.x-=1;if(keys.current.KeyD)m.x+=1;if(m.lengthSq()){m.normalize();const sy=Math.sin(yaw.current),cy=Math.cos(yaw.current),x=m.x*cy-m.z*sy,z=m.x*sy+m.z*cy,s=(keys.current.ShiftLeft||keys.current.ShiftRight)?14:6.2;b.setLinvel({x:x*s,y:v.y,z:z*s},true);b.setRotation(new THREE.Quaternion().setFromEuler(new THREE.Euler(0,Math.atan2(x,z),0)),true)}else b.setLinvel({x:0,y:v.y,z:0},true);const p=b.translation(),ground=p.y<1.18;if(keys.current.Space&&!jump.current){jump.current=true;if(ground)b.setLinvel({x:v.x,y:7.2,z:v.z},true)}if(!keys.current.Space)jump.current=false;const ds=(keys.current.ShiftLeft||keys.current.ShiftRight)&&m.lengthSq();if(ds&&!dash.current){dash.current=true;onDash()}if(!ds)dash.current=false;window.__srp={x:p.x,y:p.y,z:p.z};const target=new THREE.Vector3(p.x,p.y+.8,p.z),dist=6,off=new THREE.Vector3(Math.sin(yaw.current)*dist*Math.cos(pitch.current),2.6+Math.sin(pitch.current)*dist,Math.cos(yaw.current)*dist*Math.cos(pitch.current));camera.position.lerp(target.clone().add(off),1-Math.pow(.001,dt));camera.lookAt(target)});return null}
-function Game({active,onWin,onLose}){const body=useRef(),[got,setGot]=useState(()=>Array(12).fill(false)),[hp,setHp]=useState(100);const [time,setTime]=useState(90),hitLock=useRef(0),start=useRef(0);useEffect(()=>{if(!active)return;start.current=performance.now();const id=setInterval(()=>{const t=Math.max(0,90-Math.floor((performance.now()-start.current)/1000));setTime(t);if(!t)onLose('TIME')},250);return()=>clearInterval(id)},[active,onLose]);useFrame((_,d)=>{if(hitLock.current>0)hitLock.current-=d});const hit=()=>{if(hitLock.current>0)return;hitLock.current=1.2;setHp(v=>{const n=Math.max(0,v-20);if(!n)onLose('DRONE');return n})};const take=i=>setGot(a=>{if(a[i])return a;const n=[...a];n[i]=true;if(n.every(Boolean))onWin();return n});return <><Environment preset="city"/><Stars radius={90} depth={45} count={3000} factor={2.6} fade speed={.15}/><Sparkles count={80} scale={[60,12,60]} size={2} speed={.15} color="#52dfff"/><ambientLight intensity={1.15}/><directionalLight castShadow position={[12,24,10]} intensity={2.2} shadow-mapSize={[2048,2048]}/><City/><StreetLight p={[-5,0,-5]}/><StreetLight p={[5,0,5]}/><StreetLight p={[-5,0,20]}/><StreetLight p={[20,0,-5]}/><Physics gravity={[0,-19,0]}><CuboidCollider position={[0,-1,0]} args={[38,1,38]} friction={1}/>{blocks.map((b,i)=><Obstacle key={i} p={b.slice(0,3)} s={b[3]}/>)}<Player refBody={body}/><Controller body={body} run={active} onDash={()=>{}}/>{cores.map((p,i)=><Core key={i} p={p} taken={got[i]} onTake={()=>take(i)}/>)}{drones.map((p,i)=><Drone key={i} p={p} i={i} onHit={hit}/>)}</Physics></>}
-function App(){const[run,setRun]=useState(false),[result,setResult]=useState(''),[round,setRound]=useState(0);const restart=()=>{setResult('');setRun(false);setRound(v=>v+1)};return <div className="game"><Canvas key={round} shadows camera={{position:[0,4,10],fov:58}} dpr={[1,1.6]}><color attach="background" args={['#07111d']}/><fog attach="fog" args={['#07111d',18,78]}/><Game key={round} active={run&&!result} onWin={()=>setResult('WIN')} onLose={r=>setResult(r)}/></Canvas><div className="shade"/><header><div className="logo">SKYLINE <b>RUSH</b></div><div className="tag">NEON CITY RUN</div></header>{run&&!result&&<div className="hud"><div><small>CORES</small><strong>COLLECT 12</strong></div><div><small>TIME</small><strong>90s</strong></div><div><small>HEALTH</small><strong>100</strong></div></div>}{!run&&!result&&<section className="menu"><small>3D ACTION WEB GAME</small><h1>SKYLINE<br/><i>RUSH</i></h1><p>Run the city. Grab every energy core. Dodge the security drones. Dash through the skyline before the clock hits zero.</p><button onClick={()=>setRun(true)}>PLAY NOW</button><div className="controls"><span>WASD</span> MOVE <span>MOUSE</span> LOOK <span>SPACE</span> JUMP <span>SHIFT</span> DASH</div></section>}{result&&<section className="result"><small>{result==='WIN'?'CITY SECURED':'RUN OVER'}</small><h2>{result==='WIN'?'YOU OWN THE SKYLINE.':result==='TIME'?'TIME IS UP.':'DRONES GOT YOU.'}</h2><button onClick={restart}>RUN AGAIN</button></section>}<div className="cross">+</div><footer>CLICK TO CAPTURE MOUSE · ESC TO RELEASE</footer></div>}
-ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+const HDRI_URL = 'https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/2k/modern_evening_street_2k.hdr';
+const GLB_URL = 'https://threejs.org/examples/models/gltf/DamagedHelmet/glTF-Binary/DamagedHelmet.glb';
+const WALK_SPEED = 5.5;
+const DASH_SPEED = 15;
+const JUMP_SPEED = 7.2;
+const START_TIME = 90;
+
+const cores = [
+  [-18, 1.1, -18], [-7, 1.1, -21], [7, 1.1, -18], [19, 1.1, -12],
+  [24, 1.1, -2], [18, 1.1, 10], [7, 1.1, 19], [-6, 1.1, 21],
+  [-18, 1.1, 17], [-24, 1.1, 7], [-24, 1.1, -5], [-14, 1.1, 7],
+];
+
+const blocks = [
+  [-13, 1.1, -3, [4, 2.2, 2]], [-4, 1.1, -13, [2.4, 2.2, 5]],
+  [8, 1.2, -5, [4.3, 2.4, 2.2]], [18, 1.1, 1, [2.4, 2.2, 5]],
+  [7, 1.1, 12, [5, 2.2, 2]], [-8, 1.35, 10, [2.2, 2.7, 5]],
+  [-18, 1.1, 2, [4, 2.2, 2]], [1, 0.9, 20, [3, 1.8, 3]],
+];
+
+const drones = [[-14, 4.8, -10], [12, 5.2, -14], [23, 4.8, 5], [-19, 5.1, 12], [5, 5, 15]];
+
+function PBRMaterial({ color = '#ffffff', roughness = 0.75, metalness = 0.1, emissive = '#000000', emissiveIntensity = 0 }) {
+  return (
+    <meshPhysicalMaterial
+      color={color}
+      roughness={roughness}
+      metalness={metalness}
+      clearcoat={0.15}
+      clearcoatRoughness={0.25}
+      emissive={emissive}
+      emissiveIntensity={emissiveIntensity}
+    />
+  );
+}
+
+function Building({ x, z, w, d, h, color, windows = true }) {
+  return (
+    <group position={[x, h / 2, z]}>
+      <mesh castShadow receiveShadow>
+        <boxGeometry args={[w, h, d]} />
+        <PBRMaterial color={color} roughness={0.68} metalness={0.08} />
+      </mesh>
+      {windows && Array.from({ length: Math.max(4, Math.floor(w / 1.7)) }).map((_, i) => (
+        <mesh key={i} position={[-w / 2 + 0.7 + i * ((w - 1.4) / Math.max(1, Math.floor(w / 1.7) - 1)), 0.7, d / 2 + 0.018]}>
+          <boxGeometry args={[0.55, 0.65, 0.028]} />
+          <PBRMaterial
+            color="#102337"
+            roughness={0.16}
+            metalness={0.55}
+            emissive={i % 3 === 0 ? '#ff914d' : '#57cfff'}
+            emissiveIntensity={0.45}
+          />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function City() {
+  const buildings = [
+    [-29, -27, 7, 8, 13], [-17, -29, 6, 7, 9], [-6, -29, 7, 6, 16], [10, -28, 8, 7, 11], [24, -28, 7, 8, 15],
+    [-29, -16, 7, 7, 10], [-28, -2, 8, 8, 17], [29, -10, 8, 10, 12], [-31, 13, 7, 8, 14],
+    [27, 16, 8, 9, 18], [-27, 27, 9, 6, 11], [-14, 29, 7, 8, 15], [1, 29, 8, 7, 12],
+    [16, 29, 9, 8, 17], [30, 26, 6, 6, 10],
+  ];
+
+  return (
+    <group>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        <planeGeometry args={[76, 76]} />
+        <MeshReflectorMaterial
+          blur={[350, 120]}
+          resolution={512}
+          mixBlur={0.72}
+          mixStrength={1.55}
+          roughness={0.28}
+          depthScale={0.8}
+          minDepthThreshold={0.42}
+          maxDepthThreshold={1.15}
+          color="#151a20"
+          metalness={0.4}
+        />
+      </mesh>
+
+      {buildings.map((b, i) => (
+        <Building key={i} x={b[0]} z={b[1]} w={b[2]} d={b[3]} h={b[4]} color={i % 3 === 0 ? '#222a34' : '#2b3440'} />
+      ))}
+
+      <mesh position={[0, 0.045, 0]} receiveShadow>
+        <boxGeometry args={[62, 0.09, 7]} />
+        <PBRMaterial color="#30363e" roughness={0.82} metalness={0.22} />
+      </mesh>
+      <mesh position={[0, 0.05, 0]} receiveShadow>
+        <boxGeometry args={[7, 0.09, 62]} />
+        <PBRMaterial color="#30363e" roughness={0.82} metalness={0.22} />
+      </mesh>
+      {[...Array(7)].map((_, i) => {
+        const v = -27 + i * 9;
+        return (
+          <React.Fragment key={v}>
+            <mesh position={[v, 0.1, 0]}>
+              <boxGeometry args={[0.08, 0.025, 62]} />
+              <meshStandardMaterial color="#b7a66f" emissive="#b7a66f" emissiveIntensity={0.15} />
+            </mesh>
+            <mesh position={[0, 0.1, v]}>
+              <boxGeometry args={[62, 0.025, 0.08]} />
+              <meshStandardMaterial color="#b7a66f" emissive="#b7a66f" emissiveIntensity={0.15} />
+            </mesh>
+          </React.Fragment>
+        );
+      })}
+    </group>
+  );
+}
+
+function StreetLight({ position }) {
+  return (
+    <group position={position}>
+      <mesh position={[0, 2, 0]} castShadow>
+        <cylinderGeometry args={[0.06, 0.09, 4, 12]} />
+        <PBRMaterial color="#3d454d" roughness={0.35} metalness={0.82} />
+      </mesh>
+      <mesh position={[0, 4, 0]}>
+        <sphereGeometry args={[0.18, 20, 16]} />
+        <PBRMaterial color="#ffdca0" emissive="#ffac3d" emissiveIntensity={5} roughness={0.2} metalness={0.2} />
+      </mesh>
+      <pointLight position={[0, 3.8, 0]} intensity={16} distance={8} color="#ffd18a" castShadow />
+    </group>
+  );
+}
+
+function Billboard({ position, color = '#00dcff' }) {
+  return (
+    <group position={position}>
+      <mesh castShadow>
+        <boxGeometry args={[2.2, 1.2, 0.16]} />
+        <PBRMaterial color="#0b121a" roughness={0.28} metalness={0.42} />
+      </mesh>
+      <mesh position={[0, 0, -0.1]}>
+        <planeGeometry args={[1.9, 0.9]} />
+        <meshBasicMaterial color={color} toneMapped={false} />
+      </mesh>
+      <pointLight position={[0, 0, 0.8]} color={color} intensity={5} distance={5} />
+    </group>
+  );
+}
+
+function Artifact() {
+  const { scene } = useGLTF(GLB_URL);
+  const cloned = useMemo(() => scene.clone(true), [scene]);
+  cloned.traverse((obj) => {
+    if (obj.isMesh) {
+      obj.castShadow = true;
+      obj.receiveShadow = true;
+    }
+  });
+  return (
+    <group position={[2.4, 1.15, 2.2]} rotation={[0.06, -0.8, 0.02]} scale={1.55}>
+      <mesh position={[0, -0.75, 0]} castShadow receiveShadow>
+        <cylinderGeometry args={[0.75, 0.85, 0.18, 48]} />
+        <PBRMaterial color="#151a20" roughness={0.32} metalness={0.7} />
+      </mesh>
+      <Float speed={0.7} rotationIntensity={0.08} floatIntensity={0.1}>
+        <primitive object={cloned} />
+      </Float>
+      <pointLight position={[0, 0.6, 0]} intensity={3.5} distance={4} color="#62bfff" />
+    </group>
+  );
+}
+
+function Rain({ count = 1400 }) {
+  const ref = useRef();
+  const positions = useMemo(() => {
+    const arr = new Float32Array(count * 3);
+    for (let i = 0; i < count; i += 1) {
+      arr[i * 3] = THREE.MathUtils.randFloatSpread(72);
+      arr[i * 3 + 1] = Math.random() * 20 + 3;
+      arr[i * 3 + 2] = THREE.MathUtils.randFloatSpread(72);
+    }
+    return arr;
+  }, [count]);
+
+  useFrame((_, delta) => {
+    if (!ref.current) return;
+    const attr = ref.current.geometry.attributes.position;
+    for (let i = 0; i < count; i += 1) {
+      const y = attr.array[i * 3 + 1] - delta * 17;
+      attr.array[i * 3 + 1] = y < 0.2 ? 23 : y;
+    }
+    attr.needsUpdate = true;
+  });
+
+  return (
+    <points ref={ref} frustumCulled={false}>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
+      </bufferGeometry>
+      <pointsMaterial size={0.045} color="#b9d7ff" transparent opacity={0.45} depthWrite={false} sizeAttenuation />
+    </points>
+  );
+}
+
+function Core({ position, taken, onTake }) {
+  const ref = useRef();
+  useFrame((state, delta) => {
+    if (!ref.current || taken) return;
+    ref.current.rotation.y += delta * 2;
+    ref.current.position.y = position[1] + Math.sin(state.clock.elapsedTime * 3 + position[0]) * 0.12;
+  });
+  if (taken) return null;
+  return (
+    <group ref={ref} position={position} onClick={onTake}>
+      <mesh castShadow>
+        <icosahedronGeometry args={[0.3, 3]} />
+        <PBRMaterial color="#b9fcff" emissive="#16dfff" emissiveIntensity={5.5} roughness={0.12} metalness={0.6} />
+      </mesh>
+      <pointLight intensity={8} distance={4.5} color="#18dfff" />
+    </group>
+  );
+}
+
+function Drone({ position, index, onHit }) {
+  const ref = useRef();
+  useFrame((state) => {
+    if (!ref.current) return;
+    const t = state.clock.elapsedTime;
+    ref.current.position.set(
+      position[0] + Math.sin(t * 0.7 + index) * 4,
+      position[1] + Math.sin(t * 1.3 + index) * 0.65,
+      position[2] + Math.cos(t * 0.6 + index) * 3,
+    );
+    const p = window.__nightshiftPlayer;
+    if (p) {
+      const distSq = (p.x - ref.current.position.x) ** 2 + (p.z - ref.current.position.z) ** 2;
+      if (distSq < 2.25 && Math.abs(p.y - ref.current.position.y) < 1.8) onHit();
+    }
+  });
+
+  return (
+    <group ref={ref} position={position}>
+      <mesh castShadow>
+        <sphereGeometry args={[0.45, 24, 20]} />
+        <PBRMaterial color="#35161b" emissive="#ff1238" emissiveIntensity={3.2} roughness={0.23} metalness={0.58} />
+      </mesh>
+      {[0, Math.PI / 2, Math.PI, Math.PI * 1.5].map((angle) => (
+        <mesh key={angle} position={[Math.cos(angle) * 0.72, 0, Math.sin(angle) * 0.72]} rotation={[0, angle, 0]}>
+          <boxGeometry args={[0.5, 0.08, 0.08]} />
+          <PBRMaterial color="#bdc7d1" roughness={0.22} metalness={0.9} />
+        </mesh>
+      ))}
+      <pointLight color="#ff244e" intensity={7} distance={4} />
+    </group>
+  );
+}
+
+function Player({ bodyRef }) {
+  return (
+    <RigidBody ref={bodyRef} position={[0, 1.2, 25]} colliders={false} enabledRotations={[false, false, false]} linearDamping={7} angularDamping={18}>
+      <CapsuleCollider args={[0.52, 0.34]} friction={1} restitution={0} />
+      <group>
+        <mesh position={[0, 0.6, 0]} castShadow>
+          <capsuleGeometry args={[0.32, 0.62, 10, 20]} />
+          <PBRMaterial color="#dce7ef" roughness={0.34} metalness={0.18} clearcoat={0.7} />
+        </mesh>
+        <mesh position={[0, 1.38, 0]} castShadow>
+          <sphereGeometry args={[0.32, 24, 20]} />
+          <PBRMaterial color="#cddbe5" roughness={0.3} metalness={0.2} clearcoat={0.65} />
+        </mesh>
+        <mesh position={[-0.34, 0.6, 0]} castShadow rotation={[0, 0, -0.12]}>
+          <capsuleGeometry args={[0.09, 0.48, 8, 12]} />
+          <PBRMaterial color="#91adbf" roughness={0.4} metalness={0.16} />
+        </mesh>
+        <mesh position={[0.34, 0.6, 0]} castShadow rotation={[0, 0, 0.12]}>
+          <capsuleGeometry args={[0.09, 0.48, 8, 12]} />
+          <PBRMaterial color="#91adbf" roughness={0.4} metalness={0.16} />
+        </mesh>
+        <mesh position={[-0.15, 0.02, 0]} castShadow>
+          <capsuleGeometry args={[0.1, 0.46, 8, 12]} />
+          <PBRMaterial color="#667f90" roughness={0.48} metalness={0.18} />
+        </mesh>
+        <mesh position={[0.15, 0.02, 0]} castShadow>
+          <capsuleGeometry args={[0.1, 0.46, 8, 12]} />
+          <PBRMaterial color="#667f90" roughness={0.48} metalness={0.18} />
+        </mesh>
+      </group>
+    </RigidBody>
+  );
+}
+
+function Controller({ bodyRef, active }) {
+  const { camera, gl } = useThree();
+  const keys = useRef({});
+  const yaw = useRef(0);
+  const pitch = useRef(0.15);
+  const jumping = useRef(false);
+
+  useEffect(() => {
+    const down = (e) => {
+      keys.current[e.code] = true;
+      if (e.code === 'Space' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') e.preventDefault();
+    };
+    const up = (e) => { keys.current[e.code] = false; };
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+    };
+  }, []);
+
+  useEffect(() => {
+    const canvas = gl.domElement;
+    const click = () => {
+      if (active && document.pointerLockElement !== canvas) canvas.requestPointerLock?.();
+    };
+    const mouse = (e) => {
+      if (!active || document.pointerLockElement !== canvas) return;
+      yaw.current -= e.movementX * 0.0025;
+      pitch.current = THREE.MathUtils.clamp(pitch.current - e.movementY * 0.0018, -0.55, 0.58);
+    };
+    canvas.addEventListener('click', click);
+    document.addEventListener('mousemove', mouse);
+    return () => {
+      canvas.removeEventListener('click', click);
+      document.removeEventListener('mousemove', mouse);
+    };
+  }, [gl, active]);
+
+  useFrame((_, delta) => {
+    if (!active || !bodyRef.current) return;
+    const body = bodyRef.current;
+    const vel = body.linvel();
+    const input = new THREE.Vector3();
+    if (keys.current.KeyW) input.z -= 1;
+    if (keys.current.KeyS) input.z += 1;
+    if (keys.current.KeyA) input.x -= 1;
+    if (keys.current.KeyD) input.x += 1;
+
+    if (input.lengthSq()) {
+      input.normalize();
+      const sy = Math.sin(yaw.current);
+      const cy = Math.cos(yaw.current);
+      const wx = input.x * cy - input.z * sy;
+      const wz = input.x * sy + input.z * cy;
+      const sprint = keys.current.ShiftLeft || keys.current.ShiftRight;
+      const speed = sprint ? DASH_SPEED : WALK_SPEED;
+      body.setLinvel({ x: wx * speed, y: vel.y, z: wz * speed }, true);
+      body.setRotation(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.atan2(wx, wz), 0)), true);
+    } else {
+      body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+    }
+
+    const p = body.translation();
+    const grounded = p.y <= 1.17;
+    if (keys.current.Space && !jumping.current) {
+      jumping.current = true;
+      if (grounded) body.setLinvel({ x: vel.x, y: JUMP_SPEED, z: vel.z }, true);
+    }
+    if (!keys.current.Space) jumping.current = false;
+
+    window.__nightshiftPlayer = { x: p.x, y: p.y, z: p.z };
+
+    const target = new THREE.Vector3(p.x, p.y + 0.9, p.z);
+    const distance = 6.1;
+    const offset = new THREE.Vector3(
+      Math.sin(yaw.current) * distance * Math.cos(pitch.current),
+      2.4 + Math.sin(pitch.current) * distance,
+      Math.cos(yaw.current) * distance * Math.cos(pitch.current),
+    );
+    camera.position.lerp(target.clone().add(offset), 1 - Math.pow(0.001, delta));
+    camera.lookAt(target);
+  });
+
+  return null;
+}
+
+function Scene({ active, coresTaken, onCore, onDroneHit, round }) {
+  return (
+    <>
+      <Environment files={HDRI_URL} background={false} intensity={0.65} />
+      <color attach="background" args={['#060b13']} />
+      <fog attach="fog" args={['#070c14', 14, 78]} />
+
+      <ambientLight intensity={0.65} color="#9bb8d6" />
+      <hemisphereLight intensity={0.7} color="#9fc7ff" groundColor="#161920" />
+      <directionalLight
+        castShadow
+        position={[14, 24, 8]}
+        intensity={1.8}
+        color="#cad8ff"
+        shadow-mapSize={[4096, 4096]}
+        shadow-camera-left={-35}
+        shadow-camera-right={35}
+        shadow-camera-top={35}
+        shadow-camera-bottom={-35}
+        shadow-bias={-0.00012}
+      />
+
+      <City />
+      <Rain count={1700} />
+      <StreetLight position={[-5, 0, -5]} />
+      <StreetLight position={[5, 0, 5]} />
+      <StreetLight position={[-5, 0, 20]} />
+      <StreetLight position={[20, 0, -5]} />
+      <StreetLight position={[-22, 0, 10]} />
+      <StreetLight position={[22, 0, 10]} />
+      <Billboard position={[-3, 2.2, -8]} color="#2deaff" />
+      <Billboard position={[8, 2.1, 5]} color="#ff4e9c" />
+      <Artifact />
+
+      <Sparkles count={70} scale={[60, 10, 60]} size={1.2} speed={0.1} color="#65dfff" />
+      <Stars radius={85} depth={42} count={2400} factor={2.1} fade speed={0.12} />
+
+      <Physics gravity={[0, -18, 0]} key={round}>
+        <CuboidCollider position={[0, -0.9, 0]} args={[38, 0.9, 38]} friction={1} restitution={0} />
+        {blocks.map((b, i) => (
+          <RigidBody key={i} type="fixed" colliders="cuboid" friction={1} restitution={0}>
+            <mesh position={b.slice(0, 3)} castShadow receiveShadow>
+              <boxGeometry args={b[3]} />
+              <PBRMaterial color="#45515e" roughness={0.72} metalness={0.28} clearcoat={0.25} />
+            </mesh>
+          </RigidBody>
+        ))}
+        <Player bodyRef={window.__nightshiftBodyRef || { current: null }} />
+      </Physics>
+    </>
+  );
+}
+
+function GameWorld({ active, onWin, onLose, round }) {
+  const bodyRef = useRef();
+  const [taken, setTaken] = useState(Array(cores.length).fill(false));
+  const [hp, setHp] = useState(100);
+  const hitLock = useRef(0);
+
+  useEffect(() => {
+    window.__nightshiftBodyRef = bodyRef;
+    return () => { window.__nightshiftBodyRef = null; };
+  }, []);
+
+  useFrame((_, delta) => {
+    if (hitLock.current > 0) hitLock.current -= delta;
+  });
+
+  const takeCore = (index) => {
+    setTaken((prev) => {
+      if (prev[index]) return prev;
+      const next = [...prev];
+      next[index] = true;
+      if (next.every(Boolean)) onWin();
+      return next;
+    });
+  };
+
+  const hitDrone = () => {
+    if (hitLock.current > 0) return;
+    hitLock.current = 1.1;
+    setHp((value) => {
+      const next = Math.max(0, value - 20);
+      if (next === 0) onLose('DRONE');
+      return next;
+    });
+  };
+
+  return (
+    <>
+      <Scene active={active} coresTaken={taken} onCore={takeCore} onDroneHit={hitDrone} round={round} />
+      {cores.map((p, i) => <Core key={i} position={p} taken={taken[i]} onTake={() => takeCore(i)} />)}
+      {drones.map((p, i) => <Drone key={i} position={p} index={i} onHit={hitDrone} />)}
+      <Controller bodyRef={bodyRef} active={active} />
+      <div className="internal-hud">
+        <span>CORES {taken.filter(Boolean).length}/12</span>
+        <span>HP {hp}</span>
+      </div>
+    </>
+  );
+}
+
+function App() {
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState('');
+  const [time, setTime] = useState(START_TIME);
+  const [round, setRound] = useState(0);
+
+  useEffect(() => {
+    if (!running || result) return undefined;
+    const id = window.setInterval(() => {
+      setTime((t) => {
+        if (t <= 1) {
+          setResult('TIME');
+          setRunning(false);
+          return 0;
+        }
+        return t - 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [running, result]);
+
+  const start = () => {
+    setResult('');
+    setTime(START_TIME);
+    setRound((r) => r + 1);
+    setRunning(true);
+  };
+
+  return (
+    <div className="game">
+      <Canvas
+        shadows
+        camera={{ position: [0, 4, 10], fov: 58, near: 0.05, far: 120 }}
+        gl={{
+          antialias: true,
+          powerPreference: 'high-performance',
+          stencil: false,
+          depth: true,
+        }}
+        onCreated={({ gl }) => {
+          gl.outputColorSpace = THREE.SRGBColorSpace;
+          gl.toneMapping = THREE.ACESFilmicToneMapping;
+          gl.toneMappingExposure = 1.1;
+          gl.shadowMap.enabled = true;
+          gl.shadowMap.type = THREE.PCFSoftShadowMap;
+        }}
+      >
+        <Suspense fallback={null}>
+          <GameWorld
+            active={running && !result}
+            round={round}
+            onWin={() => { setResult('WIN'); setRunning(false); }}
+            onLose={() => { setResult('LOSE'); setRunning(false); }}
+          />
+          <EffectComposer multisampling={0}>
+            <Bloom intensity={1.05} luminanceThreshold={0.6} luminanceSmoothing={0.82} mipmapBlur />
+            <Vignette eskil={false} offset={0.15} darkness={0.78} />
+            <Noise opacity={0.028} />
+            <SMAA />
+          </EffectComposer>
+        </Suspense>
+      </Canvas>
+
+      <div className="shade" />
+      <header>
+        <div className="logo">NIGHTSHIFT <b>RAIN RUN</b></div>
+        <div className="tag">PHOTOREAL 3D TEST</div>
+      </header>
+
+      {running && !result && (
+        <div className="hud-panel">
+          <div><small>TIME</small><strong>{String(time).padStart(2, '0')}</strong></div>
+          <div><small>OBJECTIVE</small><strong>12 CORES</strong></div>
+        </div>
+      )}
+
+      {!running && !result && (
+        <section className="menu">
+          <div className="eyebrow">WEB 3D / REAL-TIME RAIN CITY</div>
+          <h1>NIGHTSHIFT<br /><i>RAIN RUN</i></h1>
+          <p>Collect every energy core while rain, wet streets, neon reflections and security drones turn the blackout district into a moving obstacle course.</p>
+          <button onClick={start}>ENTER THE NIGHT</button>
+          <div className="controls"><span>WASD</span> MOVE <span>MOUSE</span> LOOK <span>SPACE</span> JUMP <span>SHIFT</span> DASH</div>
+        </section>
+      )}
+
+      {result && (
+        <section className="result">
+          <div className="eyebrow">{result === 'WIN' ? 'CITY SECURED' : 'SYSTEM FAILURE'}</div>
+          <h2>{result === 'WIN' ? 'THE DISTRICT IS ALIVE.' : result === 'TIME' ? 'THE CLOCK WON.' : 'THE DRONES FOUND YOU.'}</h2>
+          <button onClick={start}>RUN AGAIN</button>
+        </section>
+      )}
+
+      <div className="cross">+</div>
+      <footer>CLICK TO CAPTURE MOUSE · ESC TO RELEASE</footer>
+    </div>
+  );
+}
+
+useGLTF.preload(GLB_URL);
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);
