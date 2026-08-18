@@ -57,6 +57,107 @@ canvas {
   opacity: 0.8;
 }
 
+.start-card {
+  position: absolute;
+  top: 72px;
+  left: 28px;
+  padding: 14px 16px;
+  border-left: 3px solid rgba(255, 255, 255, 0.8);
+  background: rgba(10, 13, 18, 0.35);
+  backdrop-filter: blur(8px);
+}
+
+.start-title {
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.start-subtitle {
+  margin-top: 5px;
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.key-row {
+  margin-top: 9px;
+  font-size: 10px;
+  opacity: 0.85;
+}
+
+.key-row span {
+  display: inline-block;
+  margin-right: 5px;
+  padding: 3px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.14);
+  font-weight: 800;
+}
+
+.camo-panel {
+  position: absolute;
+  top: 70px;
+  left: 28px;
+  width: 250px;
+  padding: 13px 15px;
+  border-radius: 10px;
+  background: rgba(10, 13, 18, 0.58);
+  backdrop-filter: blur(10px);
+}
+
+.camo-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+
+.camo-heading strong {
+  font-size: 18px;
+  letter-spacing: 0;
+}
+
+.camo-bar {
+  height: 7px;
+  margin-top: 9px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.camo-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: rgba(255, 255, 255, 0.9);
+  transition: width 160ms ease-out;
+}
+
+.camo-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 9px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.sample-swatch {
+  width: 13px;
+  height: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 3px;
+}
+
+.camo-help {
+  margin-left: auto;
+  font-size: 8px;
+  opacity: 0.55;
+  letter-spacing: 0.05em;
+}
+
 .controls {
   position: absolute;
   left: 50%;
@@ -85,4 +186,35 @@ canvas {
   font-weight: 300;
   pointer-events: none;
   text-shadow: 0 1px 5px rgba(0, 0, 0, 0.8);
+}
+
+@media (max-width: 700px) {
+  .brand {
+    top: 16px;
+    left: 16px;
+    font-size: 18px;
+  }
+
+  .objective {
+    top: 20px;
+    right: 16px;
+    font-size: 8px;
+  }
+
+  .start-card,
+  .camo-panel {
+    top: 58px;
+    left: 16px;
+  }
+
+  .camo-panel {
+    width: 220px;
+  }
+
+  .controls {
+    bottom: 16px;
+    max-width: calc(100% - 32px);
+    overflow: hidden;
+    font-size: 10px;
+  }
 }
