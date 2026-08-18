@@ -1,208 +1,29 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import ReactDOM from 'react-dom/client';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Sky } from '@react-three/drei';
-import * as THREE from 'three';
-import './style.css';
+import React,{useEffect,useMemo,useRef,useState}from'react';
+import ReactDOM from'react-dom/client';
+import{Canvas,useFrame,useThree}from'@react-three/fiber';
+import{Sky}from'@react-three/drei';
+import*as THREE from'three';
+import'./style.css';
 
-const BASE_COLOR = '#65c466';
-const SPEED = 4.2;
-const PLAYER_RADIUS = 0.42;
-const COLLIDERS = [
-  { x: -5, z: -5, hx: 1.5, hz: 0.75 }, { x: 5, z: -5, hx: 1, hz: 1 },
-  { x: -6, z: 3, hx: 0.75, hz: 1.5 }, { x: 5.5, z: 3, hx: 1.5, hz: 0.75 },
-  { x: 0, z: -2, hx: 0.5, hz: 0.5 }, { x: 2.5, z: 4, hx: 0.75, hz: 0.75 }
-];
-const PALETTE = ['#111111','#ffffff','#e53935','#ff7a00','#ffd43b','#65c466','#18b66f','#16a5d9','#3267e8','#7d4de8','#d946ef','#ff4f81','#795548','#9e9e9e','#607d8b','#f0c39a'];
-
-function makePaintAsset(base = '#ffffff') {
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = 1024;
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = base;
-  ctx.fillRect(0, 0, 1024, 1024);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.needsUpdate = true;
-  return { canvas, ctx, texture };
-}
-
-function pushOut(pos, box, radius) {
-  const cx = THREE.MathUtils.clamp(pos.x, box.x - box.hx, box.x + box.hx);
-  const cz = THREE.MathUtils.clamp(pos.z, box.z - box.hz, box.z + box.hz);
-  const dx = pos.x - cx, dz = pos.z - cz;
-  const d2 = dx * dx + dz * dz;
-  if (d2 >= radius * radius) return;
-  if (d2 > 0.000001) {
-    const d = Math.sqrt(d2), push = radius - d;
-    pos.x += dx / d * push; pos.z += dz / d * push; return;
-  }
-  const left = Math.abs(pos.x - (box.x - box.hx));
-  const right = Math.abs(pos.x - (box.x + box.hx));
-  const top = Math.abs(pos.z - (box.z - box.hz));
-  const bottom = Math.abs(pos.z - (box.z + box.hz));
-  const m = Math.min(left, right, top, bottom);
-  if (m === left) pos.x = box.x - box.hx - radius;
-  else if (m === right) pos.x = box.x + box.hx + radius;
-  else if (m === top) pos.z = box.z - box.hz - radius;
-  else pos.z = box.z + box.hz + radius;
-}
-
-function Player({ playerRef, assetsRef }) {
-  if (!assetsRef.current) assetsRef.current = { body: makePaintAsset(), head: makePaintAsset() };
-  const assets = assetsRef.current;
-  return (
-    <group ref={playerRef} position={[0, 0, 4]}>
-      <mesh userData={{ paintTarget: 'body' }} castShadow position={[0, 0.72, 0]}>
-        <capsuleGeometry args={[0.38, 0.8, 16, 32]} />
-        <meshStandardMaterial map={assets.body.texture} color="#ffffff" roughness={0.82} />
-      </mesh>
-      <mesh userData={{ paintTarget: 'head' }} castShadow position={[0, 1.52, 0]}>
-        <sphereGeometry args={[0.38, 32, 24]} />
-        <meshStandardMaterial map={assets.head.texture} color="#ffffff" roughness={0.82} />
-      </mesh>
-      <mesh position={[-0.14, 1.6, -0.34]}><sphereGeometry args={[0.075, 12, 12]} /><meshStandardMaterial color="#111111" /></mesh>
-      <mesh position={[0.14, 1.6, -0.34]}><sphereGeometry args={[0.075, 12, 12]} /><meshStandardMaterial color="#111111" /></mesh>
-    </group>
-  );
-}
-
-function Prop({ position, scale, color }) {
-  return <mesh castShadow receiveShadow position={position} scale={scale} userData={{ camoSurface: true }}><boxGeometry args={[1,1,1]} /><meshStandardMaterial color={color} roughness={0.9} /></mesh>;
-}
-
-function Room({ onPick }) {
-  const pick = e => { e.stopPropagation(); const c=e.object.material?.color; if(c) onPick('#'+c.getHexString()); };
-  return <group>
-    <mesh receiveShadow rotation={[-Math.PI/2,0,0]} userData={{camoSurface:true}} onClick={pick}><planeGeometry args={[24,20]} /><meshStandardMaterial color="#6b6256" roughness={1}/></mesh>
-    <mesh receiveShadow position={[0,4,-10]} userData={{camoSurface:true}} onClick={pick}><boxGeometry args={[24,8,.5]}/><meshStandardMaterial color="#b7a98e" roughness={.95}/></mesh>
-    <mesh receiveShadow position={[-12,4,0]} userData={{camoSurface:true}} onClick={pick}><boxGeometry args={[.5,8,20]}/><meshStandardMaterial color="#a9977b" roughness={.95}/></mesh>
-    <mesh receiveShadow position={[12,4,0]} userData={{camoSurface:true}} onClick={pick}><boxGeometry args={[.5,8,20]}/><meshStandardMaterial color="#a9977b" roughness={.95}/></mesh>
-    <mesh receiveShadow position={[0,4,10]} userData={{camoSurface:true}} onClick={pick}><boxGeometry args={[24,8,.5]}/><meshStandardMaterial color="#b7a98e" roughness={.95}/></mesh>
-    <Prop position={[-5,1,-5]} scale={[3,2,1.5]} color="#79583d"/><Prop position={[5,1.25,-5]} scale={[2,2.5,2]} color="#9c724e"/>
-    <Prop position={[-6,.75,3]} scale={[1.5,1.5,3]} color="#6e4d38"/><Prop position={[5.5,1,3]} scale={[3,2,1.5]} color="#806044"/>
-    <Prop position={[0,.5,-2]} scale={[1,1,1]} color="#b88759"/><Prop position={[2.5,.75,4]} scale={[1.5,1.5,1.5]} color="#72513a"/>
-  </group>;
-}
-
-function Controller({ playerRef, paintMode, setLocked, setSample }) {
-  const { camera, gl, scene } = useThree();
-  const keys=useRef({}), yaw=useRef(0), pitch=useRef(.22);
-  const smooth=useRef(new THREE.Vector3(0,3.2,8)), target=useRef(new THREE.Vector3()), look=useRef(new THREE.Vector3());
-  const ray=useMemo(()=>new THREE.Raycaster(),[]), center=useMemo(()=>new THREE.Vector2(0,0),[]);
-  const sample=()=>{ ray.setFromCamera(center,camera); const hits=ray.intersectObjects(scene.children,true); const hit=hits.find(h=>h.object.userData.camoSurface); if(hit?.object.material?.color) setSample('#'+hit.object.material.color.getHexString()); };
-  useEffect(()=>{
-    const down=e=>{ keys.current[e.code]=true; if(['KeyW','KeyA','KeyS','KeyD'].includes(e.code)) e.preventDefault(); if(e.code==='KeyP') document.exitPointerLock?.(); if(e.code==='KeyE') sample(); };
-    const up=e=>{keys.current[e.code]=false;};
-    const move=e=>{if(paintMode||document.pointerLockElement!==gl.domElement)return; yaw.current-=e.movementX*.0022; pitch.current=THREE.MathUtils.clamp(pitch.current-e.movementY*.0017,-.15,.72);};
-    const lock=()=>setLocked(document.pointerLockElement===gl.domElement);
-    window.addEventListener('keydown',down);window.addEventListener('keyup',up);document.addEventListener('mousemove',move);document.addEventListener('pointerlockchange',lock);
-    return()=>{window.removeEventListener('keydown',down);window.removeEventListener('keyup',up);document.removeEventListener('mousemove',move);document.removeEventListener('pointerlockchange',lock);};
-  },[gl,paintMode,setLocked]);
-  useEffect(()=>{const click=()=>{if(!paintMode&&document.pointerLockElement!==gl.domElement)gl.domElement.requestPointerLock();};gl.domElement.addEventListener('click',click);return()=>gl.domElement.removeEventListener('click',click);},[gl,paintMode]);
-  useFrame((_,dt)=>{
-    const p=playerRef.current;if(!p)return;
-    if(!paintMode){const move=new THREE.Vector3(), f=new THREE.Vector3(-Math.sin(yaw.current),0,-Math.cos(yaw.current)), r=new THREE.Vector3(Math.cos(yaw.current),0,-Math.sin(yaw.current));if(keys.current.KeyW)move.add(f);if(keys.current.KeyS)move.sub(f);if(keys.current.KeyD)move.add(r);if(keys.current.KeyA)move.sub(r);if(move.lengthSq()){move.normalize().multiplyScalar(SPEED*Math.min(dt,.05));p.position.add(move);p.position.x=THREE.MathUtils.clamp(p.position.x,-11.25,11.25);p.position.z=THREE.MathUtils.clamp(p.position.z,-9.25,9.25);COLLIDERS.forEach(b=>pushOut(p.position,b,PLAYER_RADIUS));p.rotation.y=THREE.MathUtils.lerp(p.rotation.y,Math.atan2(move.x,move.z),.2);}}
-    const d=paintMode?4.2:5.2,h=paintMode?1.6:1.9,cp=Math.cos(pitch.current);target.current.set(p.position.x+Math.sin(yaw.current)*d*cp,p.position.y+h+Math.sin(pitch.current)*d,p.position.z+Math.cos(yaw.current)*d*cp);target.current.x=THREE.MathUtils.clamp(target.current.x,-10.8,10.8);target.current.z=THREE.MathUtils.clamp(target.current.z,-8.8,8.8);target.current.y=THREE.MathUtils.clamp(target.current.y,1.1,7.5);smooth.current.lerp(target.current,1-Math.pow(.001,dt));camera.position.copy(smooth.current);look.current.set(p.position.x,p.position.y+1.05,p.position.z);camera.lookAt(look.current);
-  });
-  return null;
-}
-
-function PaintController({ playerRef, assetsRef, paint, onPickColor }) {
-  const { camera, gl, scene } = useThree();
-  const raycaster=useMemo(()=>new THREE.Raycaster(),[]), pointer=useMemo(()=>new THREE.Vector2(),[]);
-  const lastScreen=useRef(null), activePointer=useRef(null);
-
-  const setPointer=(clientX,clientY)=>{
-    const rect=gl.domElement.getBoundingClientRect();
-    pointer.x=((clientX-rect.left)/rect.width)*2-1;
-    pointer.y=-((clientY-rect.top)/rect.height)*2+1;
-    raycaster.setFromCamera(pointer,camera);
-  };
-
-  const raycastPlayer=(clientX,clientY)=>{
-    setPointer(clientX,clientY);
-    return raycaster.intersectObject(playerRef.current,true).find(h=>h.object.userData.paintTarget&&h.uv)||null;
-  };
-
-  const raycastEnvironment=(clientX,clientY)=>{
-    setPointer(clientX,clientY);
-    const hits=raycaster.intersectObjects(scene.children,true);
-    const hit=hits.find(h=>h.object.userData.camoSurface && h.object.material?.color);
-    if(!hit)return null;
-    return '#'+hit.object.material.color.getHexString();
-  };
-
-  const dab=hit=>{
-    if(!hit)return false;
-    const asset=assetsRef.current[hit.object.userData.paintTarget]; if(!asset)return false;
-    const x=THREE.MathUtils.clamp(hit.uv.x,0,1)*asset.canvas.width;
-    const y=(1-THREE.MathUtils.clamp(hit.uv.y,0,1))*asset.canvas.height;
-    const radius=paint.eraser?paint.size*1.8:paint.size, ctx=asset.ctx;
-    ctx.save(); ctx.globalAlpha=paint.eraser?1:.96; ctx.fillStyle=paint.eraser?BASE_COLOR:paint.color;
-    ctx.beginPath(); ctx.arc(x,y,radius,0,Math.PI*2); ctx.fill(); ctx.restore();
-    asset.texture.needsUpdate=true; paint.onDab(); return true;
-  };
-
-  const strokeBetween=(x1,y1,x2,y2)=>{
-    const distance=Math.hypot(x2-x1,y2-y1), spacing=Math.max(3,paint.size*.16), steps=Math.min(140,Math.max(1,Math.ceil(distance/spacing)));
-    for(let i=0;i<=steps;i++){const t=i/steps; dab(raycastPlayer(x1+(x2-x1)*t,y1+(y2-y1)*t));}
-  };
-
-  useEffect(()=>{
-    const down=e=>{
-      if(!paint.active||e.button!==0)return;
-      const hit=raycastPlayer(e.clientX,e.clientY);
-      if(hit){
-        e.preventDefault(); e.stopPropagation(); activePointer.current=e.pointerId; lastScreen.current={x:e.clientX,y:e.clientY}; paint.dragging.current=true; gl.domElement.setPointerCapture?.(e.pointerId); dab(hit); return;
-      }
-      const picked=raycastEnvironment(e.clientX,e.clientY);
-      if(picked){
-        e.preventDefault(); e.stopPropagation(); onPickColor(picked); paint.dragging.current=false; lastScreen.current=null;
-      }
-    };
-    const move=e=>{
-      if(!paint.active||!paint.dragging.current||activePointer.current!==e.pointerId||!lastScreen.current)return;
-      e.preventDefault(); e.stopPropagation(); strokeBetween(lastScreen.current.x,lastScreen.current.y,e.clientX,e.clientY); lastScreen.current={x:e.clientX,y:e.clientY};
-    };
-    const end=e=>{if(activePointer.current!==null&&e.pointerId!==activePointer.current)return; paint.dragging.current=false; activePointer.current=null; lastScreen.current=null; try{gl.domElement.releasePointerCapture?.(e.pointerId);}catch{}};
-    gl.domElement.addEventListener('pointerdown',down); gl.domElement.addEventListener('pointermove',move); gl.domElement.addEventListener('pointerup',end); gl.domElement.addEventListener('pointercancel',end);
-    return()=>{gl.domElement.removeEventListener('pointerdown',down); gl.domElement.removeEventListener('pointermove',move); gl.domElement.removeEventListener('pointerup',end); gl.domElement.removeEventListener('pointercancel',end);};
-  },[paint.active,paint.color,paint.size,paint.eraser,gl,camera,scene,onPickColor]);
-  return null;
-}
-
-function PaintUI({ active,setActive,color,setColor,size,setSize,eraser,setEraser,sampleColor,setColorFromSurface }) {
-  return <>
-    <div className={`paint-dock ${active?'visible':''}`}>
-      <div className="paint-topline"><div><div className="paint-title">PAINT YOUR CHAMELEON</div><div className="paint-subtitle">Click an object to pick its colour · drag over the character to paint</div></div><button className="close-paint" onClick={()=>setActive(false)}>DONE</button></div>
-      <div className="paint-tools">
-        <div className="palette-wheel">{PALETTE.map((c,i)=>{const a=i/PALETTE.length*Math.PI*2-Math.PI/2,r=56;return <button key={c} className={`palette-dot ${color.toLowerCase()===c?'selected':''}`} style={{background:c,transform:`translate(${Math.cos(a)*r}px,${Math.sin(a)*r}px)`}} onClick={()=>{setColor(c);setEraser(false)}}/>})}<div className="palette-center" style={{background:eraser?BASE_COLOR:color}}><span>{eraser?'ERASE':'COLOR'}</span></div></div>
-        <div className="tool-column"><label className="color-picker-button"><span className="tool-icon" style={{background:color}}/>COLOR PICKER<input type="color" value={color} onChange={e=>{setColor(e.target.value);setEraser(false)}}/></label><button className="tool-button" onClick={setColorFromSurface}><span className="eyedropper-icon">⌖</span>EYEDROPPER <small>E</small></button><button className={`tool-button ${eraser?'active':''}`} onClick={()=>setEraser(v=>!v)}><span className="eraser-icon">◐</span>ERASER</button></div>
-        <div className="brush-column"><div className="brush-label">BRUSH</div>{[18,42,80].map(s=><button key={s} className={`brush-button ${size===s?'active':''}`} onClick={()=>{setSize(s);setEraser(false)}}><span style={{width:Math.min(s,30),height:Math.min(s,30)}}/>{s===18?'S':s===42?'M':'L'}</button>)}</div>
-      </div>
-      <div className="selected-color-row"><span className="selected-color" style={{background:color}}/><span>SELECTED <b>{color.toUpperCase()}</b></span><span className="sampled-color" style={{background:sampleColor}}/><span>ENVIRONMENT SAMPLE</span></div>
-    </div>
-    {!active&&<button className="paint-open" onClick={()=>setActive(true)}>🖌️ PAINT <span>P</span></button>}
-  </>;
-}
-
-function App(){
-  const playerRef=useRef(),assetsRef=useRef(null),dragging=useRef(false);
-  const [locked,setLocked]=useState(false),[paintMode,setPaintMode]=useState(false),[color,setColor]=useState('#9c724e'),[size,setSize]=useState(42),[eraser,setEraser]=useState(false),[sampleColor,setSampleColor]=useState(BASE_COLOR),[count,setCount]=useState(0);
-  useEffect(()=>{if(paintMode)document.exitPointerLock?.();},[paintMode]);
-  const pickColor=(picked)=>{setColor(picked);setSampleColor(picked);setEraser(false);};
-  const paint=useMemo(()=>({active:paintMode,color,size,eraser,dragging,onDab:()=>setCount(v=>v+1)}),[paintMode,color,size,eraser]);
-  return <div className={`game ${paintMode?'painting-mode':''}`}>
-    <Canvas shadows camera={{position:[0,3.2,9],fov:65,near:.1,far:100}} gl={{antialias:true}}><color attach="background" args={['#9ba7b1']}/><fog attach="fog" args={['#9ba7b1',18,55]}/><ambientLight intensity={1.8}/><directionalLight castShadow position={[6,12,5]} intensity={3} shadow-mapSize-width={2048} shadow-mapSize-height={2048}/><Sky sunPosition={[100,20,50]} turbidity={7} rayleigh={1.2}/><Room onPick={pickColor}/><Player playerRef={playerRef} assetsRef={assetsRef}/><Controller playerRef={playerRef} paintMode={paintMode} setLocked={setLocked} setSample={setSampleColor}/><PaintController playerRef={playerRef} assetsRef={assetsRef} paint={paint} onPickColor={pickColor}/></Canvas>
-    <div className="hud"><div className="brand">HIDENSEEK <span>3D</span></div><div className="objective">TEST ROOM · 3D PAINT PROTOTYPE</div>
-      {!paintMode&&!locked&&<div className="start-card"><div className="start-title">ENTER THE ROOM</div><div className="start-subtitle">Click anywhere to capture the mouse</div><div className="key-row"><span>W A S D</span> Move <span>MOUSE</span> Look <span>P</span> Paint</div></div>}
-      {paintMode&&<div className="paint-instruction">PAINT MODE · CLICK AN OBJECT TO SAMPLE ITS COLOUR · DRAG TO PAINT</div>}
-      {!paintMode&&locked&&<div className="camo-panel compact"><div className="camo-heading"><span>PAINT COVERAGE</span><strong>{Math.min(100,Math.round(count/2))}%</strong></div><div className="camo-bar"><div className="camo-fill" style={{width:`${Math.min(100,Math.round(count/2))}%`}}/></div><div className="camo-status"><span className="sample-swatch" style={{background:sampleColor}}/><span>READY TO HIDE</span><span className="camo-help">P · PAINT</span></div></div>}
-      {!paintMode&&<div className="controls"><b>WASD</b> move&nbsp;&nbsp; <b>MOUSE</b> look&nbsp;&nbsp; <b>P</b> paint&nbsp;&nbsp; <b>E</b> sample</div>}{!paintMode&&<div className="crosshair">+</div>}
-    </div>
-    <PaintUI active={paintMode} setActive={setPaintMode} color={color} setColor={setColor} size={size} setSize={setSize} eraser={eraser} setEraser={setEraser} sampleColor={sampleColor} setColorFromSurface={()=>setColor(sampleColor)}/>
-  </div>;
-}
-
+const BASE='#65c466',SPEED=4.2,PALETTE=['#111111','#ffffff','#e53935','#ff7a00','#ffd43b','#65c466','#18b66f','#16a5d9','#3267e8','#7d4de8','#d946ef','#ff4f81','#795548','#9e9e9e','#607d8b','#f0c39a'];
+const COLLIDERS=[[-5,-5,1.5,.75],[5,-5,1,1],[-6,3,.75,1.5],[5.5,3,1.5,.75],[0,-2,.5,.5],[2.5,4,.75,.75]];
+function asset(){const c=document.createElement('canvas');c.width=c.height=1024;const x=c.getContext('2d');x.fillStyle=BASE;x.fillRect(0,0,1024,1024);const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return{canvas:c,ctx:x,texture:t};}
+function Player({refP,assets}){if(!assets.current)assets.current={body:asset(),head:asset(),armL:asset(),armR:asset(),legL:asset(),legR:asset()};const a=assets.current;const mat=(k)=><meshStandardMaterial map={a[k].texture} roughness={.9}/>;return <group ref={refP} position={[0,0,4]} scale={.62}>
+  <mesh userData={{paintTarget:'body'}} castShadow position={[0,1.35,0]}><capsuleGeometry args={[.42,.72,12,24]}/>{mat('body')}</mesh>
+  <mesh userData={{paintTarget:'head'}} castShadow position={[0,2.05,0]}><sphereGeometry args={[.42,24,18]}/>{mat('head')}</mesh>
+  <mesh userData={{paintTarget:'armL'}} castShadow position={[-.52,1.35,0]} rotation={[0,0,-.18]}><capsuleGeometry args={[.14,.72,8,12]}/>{mat('armL')}</mesh>
+  <mesh userData={{paintTarget:'armR'}} castShadow position={[.52,1.35,0]} rotation={[0,0,.18]}><capsuleGeometry args={[.14,.72,8,12]}/>{mat('armR')}</mesh>
+  <mesh userData={{paintTarget:'legL'}} castShadow position={[-.22,.52,0]}><capsuleGeometry args={[.16,.72,8,12]}/>{mat('legL')}</mesh>
+  <mesh userData={{paintTarget:'legR'}} castShadow position={[.22,.52,0]}><capsuleGeometry args={[.16,.72,8,12]}/>{mat('legR')}</mesh>
+</group>}
+function Prop({p,s,c}){return <mesh castShadow receiveShadow position={p} scale={s} userData={{surface:true}}><boxGeometry args={[1,1,1]}/><meshStandardMaterial color={c} roughness={.9}/></mesh>}
+function Room(){return <group>
+ <mesh receiveShadow rotation={[-Math.PI/2,0,0]} userData={{surface:true}}><planeGeometry args={[24,20]}/><meshStandardMaterial color="#6b6256"/></mesh>
+ {[[0,4,-10,[24,8,.5],'#b7a98e'],[-12,4,0,[.5,8,20],'#a9977b'],[12,4,0,[.5,8,20],'#a9977b'],[0,4,10,[24,8,.5],'#b7a98e']].map((v,i)=><mesh key={i} receiveShadow position={v.slice(0,3)} userData={{surface:true}}><boxGeometry args={v[3]}/><meshStandardMaterial color={v[4]}/></mesh>)}
+ <Prop p={[-5,1,-5]} s={[3,2,1.5]} c="#79583d"/><Prop p={[5,1.25,-5]} s={[2,2.5,2]} c="#9c724e"/><Prop p={[-6,.75,3]} s={[1.5,1.5,3]} c="#6e4d38"/><Prop p={[5.5,1,3]} s={[3,2,1.5]} c="#806044"/><Prop p={[0,.5,-2]} s={[1,1,1]} c="#b88759"/><Prop p={[2.5,.75,4]} s={[1.5,1.5,1.5]} c="#72513a"/>
+ </group>}
+function Controller({p,paint,setLock}){const{camera,gl}=useThree(),keys=useRef({}),yaw=useRef(0),pitch=useRef(.22),cam=useRef(new THREE.Vector3()),tar=useRef(new THREE.Vector3());useEffect(()=>{const d=e=>{keys.current[e.code]=true;if(['KeyW','KeyA','KeyS','KeyD'].includes(e.code))e.preventDefault();if(e.code==='KeyP')paint(v=>!v);if(e.code==='Enter')paint(false)},u=e=>keys.current[e.code]=false,m=e=>{if(paint()||document.pointerLockElement!==gl.domElement)return;yaw.current-=e.movementX*.0022;pitch.current=THREE.MathUtils.clamp(pitch.current-e.movementY*.0017,-.15,.72)},l=()=>setLock(document.pointerLockElement===gl.domElement);window.addEventListener('keydown',d);window.addEventListener('keyup',u);document.addEventListener('mousemove',m);document.addEventListener('pointerlockchange',l);return()=>{window.removeEventListener('keydown',d);window.removeEventListener('keyup',u);document.removeEventListener('mousemove',m);document.removeEventListener('pointerlockchange',l)}},[gl,paint,setLock]);useEffect(()=>{const c=()=>{if(!paint()&&document.pointerLockElement!==gl.domElement)gl.domElement.requestPointerLock()};gl.domElement.addEventListener('click',c);return()=>gl.domElement.removeEventListener('click',c)},[gl,paint]);useFrame((_,dt)=>{const x=p.current;if(!x)return;if(!paint()){const mv=new THREE.Vector3(),f=new THREE.Vector3(-Math.sin(yaw.current),0,-Math.cos(yaw.current)),r=new THREE.Vector3(Math.cos(yaw.current),0,-Math.sin(yaw.current));if(keys.current.KeyW)mv.add(f);if(keys.current.KeyS)mv.sub(f);if(keys.current.KeyD)mv.add(r);if(keys.current.KeyA)mv.sub(r);if(mv.lengthSq()){mv.normalize().multiplyScalar(SPEED*Math.min(dt,.05));x.position.add(mv);x.position.x=THREE.MathUtils.clamp(x.position.x,-11.25,11.25);x.position.z=THREE.MathUtils.clamp(x.position.z,-9.25,9.25);x.rotation.y=THREE.MathUtils.lerp(x.rotation.y,Math.atan2(mv.x,mv.z),.2)}}const d=paint()?3.8:5.2;tar.current.set(x.position.x+Math.sin(yaw.current)*d*Math.cos(pitch.current),x.position.y+(paint()?1.3:1.9)+Math.sin(pitch.current)*d,x.position.z+Math.cos(yaw.current)*d*Math.cos(pitch.current));cam.current.lerp(tar.current,1-Math.pow(.001,dt));camera.position.copy(cam.current);camera.lookAt(x.position.x,x.position.y+1.1,x.position.z)}) ;return null}
+function Painter({p,assets,active,color,size,eraser,pick}){const{camera,gl,scene}=useThree(),ray=useMemo(()=>new THREE.Raycaster(),[]),v=useMemo(()=>new THREE.Vector2(),[]),last=useRef(null),down=useRef(false);const set=(x,y)=>{const r=gl.domElement.getBoundingClientRect();v.x=(x-r.left)/r.width*2-1;v.y=-(y-r.top)/r.height*2+1;ray.setFromCamera(v,camera)};const hitPlayer=(x,y)=>{set(x,y);return ray.intersectObject(p.current,true).find(h=>h.object.userData.paintTarget&&h.uv)};const hitSurface=(x,y)=>{set(x,y);const h=ray.intersectObjects(scene.children,true).find(h=>h.object.userData.surface&&h.object.material?.color);return h?'#'+h.object.material.color.getHexString():null};const dab=h=>{if(!h)return;const a=assets.current[h.object.userData.paintTarget];if(!a)return;const X=h.uv.x*1024,Y=(1-h.uv.y)*1024,R=eraser?size*1.7:size;a.ctx.save();a.ctx.globalAlpha=.96;a.ctx.fillStyle=eraser?BASE:color;a.ctx.beginPath();a.ctx.arc(X,Y,R,0,Math.PI*2);a.ctx.fill();a.ctx.restore();a.texture.needsUpdate=true};useEffect(()=>{const d=e=>{if(!active||e.button!==0)return;const h=hitPlayer(e.clientX,e.clientY);if(h){down.current=true;last.current={x:e.clientX,y:e.clientY};gl.domElement.setPointerCapture?.(e.pointerId);dab(h);return}const c=hitSurface(e.clientX,e.clientY);if(c)pick(c)},m=e=>{if(!active||!down.current||!last.current)return;const a=last.current,b={x:e.clientX,y:e.clientY},n=Math.max(1,Math.ceil(Math.hypot(b.x-a.x,b.y-a.y)/(size*.15)));for(let i=1;i<=n;i++){const t=i/n;dab(hitPlayer(a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t))}last.current=b},u=()=>{down.current=false;last.current=null};gl.domElement.addEventListener('pointerdown',d);gl.domElement.addEventListener('pointermove',m);window.addEventListener('pointerup',u);return()=>{gl.domElement.removeEventListener('pointerdown',d);gl.domElement.removeEventListener('pointermove',m);window.removeEventListener('pointerup',u)}},[active,color,size,eraser,gl,camera,scene]);return null}
+function UI({active,setActive,color,setColor,size,setSize,eraser,setEraser}){return <><div className={`paint-dock ${active?'visible':''}`}><div className="paint-topline"><div><div className="paint-title">PAINT YOUR CHAMELEON</div><div className="paint-subtitle">Click an object to pick its colour · drag over the character</div></div><div className="enter-hint">ENTER · FINISH</div></div><div className="paint-tools"><div className="palette-wheel">{PALETTE.map((c,i)=>{const a=i/PALETTE.length*Math.PI*2-Math.PI/2;return <button key={c} className={`palette-dot ${color.toLowerCase()===c?'selected':''}`} style={{background:c,transform:`translate(${Math.cos(a)*56}px,${Math.sin(a)*56}px)`}} onClick={()=>{setColor(c);setEraser(false)}}/>})}<div className="palette-center" style={{background:eraser?BASE:color}}><span>{eraser?'ERASE':'COLOR'}</span></div></div><div className="tool-column"><label className="color-picker-button"><span className="tool-icon" style={{background:color}}/>COLOR PICKER<input type="color" value={color} onChange={e=>{setColor(e.target.value);setEraser(false)}}/></label><button className={`tool-button ${eraser?'active':''}`} onClick={()=>setEraser(!eraser)}>◐ ERASER</button></div><div className="brush-column"><div className="brush-label">BRUSH</div>{[18,42,80].map(s=><button key={s} className={`brush-button ${size===s?'active':''}`} onClick={()=>{setSize(s);setEraser(false)}}><span style={{width:Math.min(s,30),height:Math.min(s,30)}}/>{s===18?'S':s===42?'M':'L'}</button>)}</div></div><div className="selected-color-row"><span className="selected-color" style={{background:color}}/>SELECTED <b>{color.toUpperCase()}</b></div></div>{!active&&<button className="paint-open" onClick={()=>setActive(true)}>🖌️ PAINT <span>P</span></button>}</>}
+function App(){const p=useRef(),assets=useRef(),[active,setActive]=useState(false),[lock,setLock]=useState(false),[color,setColor]=useState('#9c724e'),[size,setSize]=useState(42),[eraser,setEraser]=useState(false);const paint=()=>active;const setPaint=v=>setActive(typeof v==='function'?v(active):v);return <div className="game"><Canvas shadows camera={{position:[0,3,9],fov:65}}><color attach="background" args={['#9ba7b1']}/><fog attach="fog" args={['#9ba7b1',18,55]}/><ambientLight intensity={1.8}/><directionalLight castShadow position={[6,12,5]} intensity={3}/><Sky sunPosition={[100,20,50]} turbidity={7} rayleigh={1.2}/><Room/><Player refP={p} assets={assets}/><Controller p={p} paint={paint} setLock={setLock}/><Painter p={p} assets={assets} active={active} color={color} size={size} eraser={eraser} pick={setColor}/></Canvas><div className="hud"><div className="brand">HIDENSEEK <span>3D</span></div><div className="objective">3D PAINT PROTOTYPE</div>{!active&&!lock&&<div className="start-card"><div className="start-title">ENTER THE ROOM</div><div className="start-subtitle">Click to capture the mouse</div><div className="key-row"><span>W A S D</span> Move <span>MOUSE</span> Look <span>P</span> Paint</div></div>}{active&&<div className="paint-instruction">PAINT MODE · CLICK AN OBJECT TO SAMPLE · DRAG TO PAINT</div>}{!active&&<div className="controls"><b>WASD</b> move&nbsp;&nbsp;<b>MOUSE</b> look&nbsp;&nbsp;<b>P</b> paint</div>}</div><UI active={active} setActive={setActive} color={color} setColor={setColor} size={size} setSize={setSize} eraser={eraser} setEraser={setEraser}/></div>}
 ReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App/></React.StrictMode>);
