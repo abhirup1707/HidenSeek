@@ -68,7 +68,7 @@ function Player({ playerRef, assetsRef }) {
 }
 
 function Prop({ position, scale, color }) {
-  return <mesh castShadow receiveShadow position={position} scale={scale}><boxGeometry args={[1,1,1]} /><meshStandardMaterial color={color} roughness={0.9} /></mesh>;
+  return <mesh castShadow receiveShadow position={position} scale={scale} userData={{ camoSurface: true }}><boxGeometry args={[1,1,1]} /><meshStandardMaterial color={color} roughness={0.9} /></mesh>;
 }
 
 function Room({ onPick }) {
@@ -108,17 +108,29 @@ function Controller({ playerRef, paintMode, setLocked, setSample }) {
   return null;
 }
 
-function PaintController({ playerRef, assetsRef, paint }) {
-  const { camera, gl } = useThree();
+function PaintController({ playerRef, assetsRef, paint, onPickColor }) {
+  const { camera, gl, scene } = useThree();
   const raycaster=useMemo(()=>new THREE.Raycaster(),[]), pointer=useMemo(()=>new THREE.Vector2(),[]);
   const lastScreen=useRef(null), activePointer=useRef(null);
 
-  const raycastAtScreen=(clientX,clientY)=>{
-    if(!paint.active||!assetsRef.current||!playerRef.current)return null;
+  const setPointer=(clientX,clientY)=>{
     const rect=gl.domElement.getBoundingClientRect();
-    pointer.x=((clientX-rect.left)/rect.width)*2-1; pointer.y=-((clientY-rect.top)/rect.height)*2+1;
+    pointer.x=((clientX-rect.left)/rect.width)*2-1;
+    pointer.y=-((clientY-rect.top)/rect.height)*2+1;
     raycaster.setFromCamera(pointer,camera);
+  };
+
+  const raycastPlayer=(clientX,clientY)=>{
+    setPointer(clientX,clientY);
     return raycaster.intersectObject(playerRef.current,true).find(h=>h.object.userData.paintTarget&&h.uv)||null;
+  };
+
+  const raycastEnvironment=(clientX,clientY)=>{
+    setPointer(clientX,clientY);
+    const hits=raycaster.intersectObjects(scene.children,true);
+    const hit=hits.find(h=>h.object.userData.camoSurface && h.object.material?.color);
+    if(!hit)return null;
+    return '#'+hit.object.material.color.getHexString();
   };
 
   const dab=hit=>{
@@ -134,14 +146,20 @@ function PaintController({ playerRef, assetsRef, paint }) {
 
   const strokeBetween=(x1,y1,x2,y2)=>{
     const distance=Math.hypot(x2-x1,y2-y1), spacing=Math.max(3,paint.size*.16), steps=Math.min(140,Math.max(1,Math.ceil(distance/spacing)));
-    for(let i=0;i<=steps;i++){const t=i/steps; dab(raycastAtScreen(x1+(x2-x1)*t,y1+(y2-y1)*t));}
+    for(let i=0;i<=steps;i++){const t=i/steps; dab(raycastPlayer(x1+(x2-x1)*t,y1+(y2-y1)*t));}
   };
 
   useEffect(()=>{
     const down=e=>{
       if(!paint.active||e.button!==0)return;
-      const hit=raycastAtScreen(e.clientX,e.clientY); if(!hit)return;
-      e.preventDefault(); e.stopPropagation(); activePointer.current=e.pointerId; lastScreen.current={x:e.clientX,y:e.clientY}; paint.dragging.current=true; gl.domElement.setPointerCapture?.(e.pointerId); dab(hit);
+      const hit=raycastPlayer(e.clientX,e.clientY);
+      if(hit){
+        e.preventDefault(); e.stopPropagation(); activePointer.current=e.pointerId; lastScreen.current={x:e.clientX,y:e.clientY}; paint.dragging.current=true; gl.domElement.setPointerCapture?.(e.pointerId); dab(hit); return;
+      }
+      const picked=raycastEnvironment(e.clientX,e.clientY);
+      if(picked){
+        e.preventDefault(); e.stopPropagation(); onPickColor(picked); paint.dragging.current=false; lastScreen.current=null;
+      }
     };
     const move=e=>{
       if(!paint.active||!paint.dragging.current||activePointer.current!==e.pointerId||!lastScreen.current)return;
@@ -150,14 +168,14 @@ function PaintController({ playerRef, assetsRef, paint }) {
     const end=e=>{if(activePointer.current!==null&&e.pointerId!==activePointer.current)return; paint.dragging.current=false; activePointer.current=null; lastScreen.current=null; try{gl.domElement.releasePointerCapture?.(e.pointerId);}catch{}};
     gl.domElement.addEventListener('pointerdown',down); gl.domElement.addEventListener('pointermove',move); gl.domElement.addEventListener('pointerup',end); gl.domElement.addEventListener('pointercancel',end);
     return()=>{gl.domElement.removeEventListener('pointerdown',down); gl.domElement.removeEventListener('pointermove',move); gl.domElement.removeEventListener('pointerup',end); gl.domElement.removeEventListener('pointercancel',end);};
-  },[paint.active,paint.color,paint.size,paint.eraser,gl,camera]);
+  },[paint.active,paint.color,paint.size,paint.eraser,gl,camera,scene,onPickColor]);
   return null;
 }
 
 function PaintUI({ active,setActive,color,setColor,size,setSize,eraser,setEraser,sampleColor,setColorFromSurface }) {
   return <>
     <div className={`paint-dock ${active?'visible':''}`}>
-      <div className="paint-topline"><div><div className="paint-title">PAINT YOUR CHAMELEON</div><div className="paint-subtitle">Click + drag directly over the character</div></div><button className="close-paint" onClick={()=>setActive(false)}>DONE</button></div>
+      <div className="paint-topline"><div><div className="paint-title">PAINT YOUR CHAMELEON</div><div className="paint-subtitle">Click an object to pick its colour · drag over the character to paint</div></div><button className="close-paint" onClick={()=>setActive(false)}>DONE</button></div>
       <div className="paint-tools">
         <div className="palette-wheel">{PALETTE.map((c,i)=>{const a=i/PALETTE.length*Math.PI*2-Math.PI/2,r=56;return <button key={c} className={`palette-dot ${color.toLowerCase()===c?'selected':''}`} style={{background:c,transform:`translate(${Math.cos(a)*r}px,${Math.sin(a)*r}px)`}} onClick={()=>{setColor(c);setEraser(false)}}/>})}<div className="palette-center" style={{background:eraser?BASE_COLOR:color}}><span>{eraser?'ERASE':'COLOR'}</span></div></div>
         <div className="tool-column"><label className="color-picker-button"><span className="tool-icon" style={{background:color}}/>COLOR PICKER<input type="color" value={color} onChange={e=>{setColor(e.target.value);setEraser(false)}}/></label><button className="tool-button" onClick={setColorFromSurface}><span className="eyedropper-icon">⌖</span>EYEDROPPER <small>E</small></button><button className={`tool-button ${eraser?'active':''}`} onClick={()=>setEraser(v=>!v)}><span className="eraser-icon">◐</span>ERASER</button></div>
@@ -173,12 +191,13 @@ function App(){
   const playerRef=useRef(),assetsRef=useRef(null),dragging=useRef(false);
   const [locked,setLocked]=useState(false),[paintMode,setPaintMode]=useState(false),[color,setColor]=useState('#9c724e'),[size,setSize]=useState(42),[eraser,setEraser]=useState(false),[sampleColor,setSampleColor]=useState(BASE_COLOR),[count,setCount]=useState(0);
   useEffect(()=>{if(paintMode)document.exitPointerLock?.();},[paintMode]);
+  const pickColor=(picked)=>{setColor(picked);setSampleColor(picked);setEraser(false);};
   const paint=useMemo(()=>({active:paintMode,color,size,eraser,dragging,onDab:()=>setCount(v=>v+1)}),[paintMode,color,size,eraser]);
   return <div className={`game ${paintMode?'painting-mode':''}`}>
-    <Canvas shadows camera={{position:[0,3.2,9],fov:65,near:.1,far:100}} gl={{antialias:true}}><color attach="background" args={['#9ba7b1']}/><fog attach="fog" args={['#9ba7b1',18,55]}/><ambientLight intensity={1.8}/><directionalLight castShadow position={[6,12,5]} intensity={3} shadow-mapSize-width={2048} shadow-mapSize-height={2048}/><Sky sunPosition={[100,20,50]} turbidity={7} rayleigh={1.2}/><Room onPick={setSampleColor}/><Player playerRef={playerRef} assetsRef={assetsRef}/><Controller playerRef={playerRef} paintMode={paintMode} setLocked={setLocked} setSample={setSampleColor}/><PaintController playerRef={playerRef} assetsRef={assetsRef} paint={paint}/></Canvas>
+    <Canvas shadows camera={{position:[0,3.2,9],fov:65,near:.1,far:100}} gl={{antialias:true}}><color attach="background" args={['#9ba7b1']}/><fog attach="fog" args={['#9ba7b1',18,55]}/><ambientLight intensity={1.8}/><directionalLight castShadow position={[6,12,5]} intensity={3} shadow-mapSize-width={2048} shadow-mapSize-height={2048}/><Sky sunPosition={[100,20,50]} turbidity={7} rayleigh={1.2}/><Room onPick={pickColor}/><Player playerRef={playerRef} assetsRef={assetsRef}/><Controller playerRef={playerRef} paintMode={paintMode} setLocked={setLocked} setSample={setSampleColor}/><PaintController playerRef={playerRef} assetsRef={assetsRef} paint={paint} onPickColor={pickColor}/></Canvas>
     <div className="hud"><div className="brand">HIDENSEEK <span>3D</span></div><div className="objective">TEST ROOM · 3D PAINT PROTOTYPE</div>
       {!paintMode&&!locked&&<div className="start-card"><div className="start-title">ENTER THE ROOM</div><div className="start-subtitle">Click anywhere to capture the mouse</div><div className="key-row"><span>W A S D</span> Move <span>MOUSE</span> Look <span>P</span> Paint</div></div>}
-      {paintMode&&<div className="paint-instruction">PAINT MODE · DRAG YOUR BRUSH OVER THE 3D CHARACTER</div>}
+      {paintMode&&<div className="paint-instruction">PAINT MODE · CLICK AN OBJECT TO SAMPLE ITS COLOUR · DRAG TO PAINT</div>}
       {!paintMode&&locked&&<div className="camo-panel compact"><div className="camo-heading"><span>PAINT COVERAGE</span><strong>{Math.min(100,Math.round(count/2))}%</strong></div><div className="camo-bar"><div className="camo-fill" style={{width:`${Math.min(100,Math.round(count/2))}%`}}/></div><div className="camo-status"><span className="sample-swatch" style={{background:sampleColor}}/><span>READY TO HIDE</span><span className="camo-help">P · PAINT</span></div></div>}
       {!paintMode&&<div className="controls"><b>WASD</b> move&nbsp;&nbsp; <b>MOUSE</b> look&nbsp;&nbsp; <b>P</b> paint&nbsp;&nbsp; <b>E</b> sample</div>}{!paintMode&&<div className="crosshair">+</div>}
     </div>
