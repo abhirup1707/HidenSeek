@@ -15,7 +15,7 @@ const COLLIDERS = [
 ];
 const PALETTE = ['#111111','#ffffff','#e53935','#ff7a00','#ffd43b','#65c466','#18b66f','#16a5d9','#3267e8','#7d4de8','#d946ef','#ff4f81','#795548','#9e9e9e','#607d8b','#f0c39a'];
 
-function makePaintAsset(base = BASE_COLOR) {
+function makePaintAsset(base = '#ffffff') {
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = 1024;
   const ctx = canvas.getContext('2d');
@@ -30,7 +30,7 @@ function makePaintAsset(base = BASE_COLOR) {
 function pushOut(pos, box, radius) {
   const cx = THREE.MathUtils.clamp(pos.x, box.x - box.hx, box.x + box.hx);
   const cz = THREE.MathUtils.clamp(pos.z, box.z - box.hz, box.z + box.hz);
-  let dx = pos.x - cx, dz = pos.z - cz;
+  const dx = pos.x - cx, dz = pos.z - cz;
   const d2 = dx * dx + dz * dz;
   if (d2 >= radius * radius) return;
   if (d2 > 0.000001) {
@@ -49,14 +49,8 @@ function pushOut(pos, box, radius) {
 }
 
 function Player({ playerRef, assetsRef }) {
-  // Keep these textures alive for the lifetime of the player. In React StrictMode,
-  // disposing them from an effect cleanup can dispose the same assets during the
-  // development re-mount cycle, which makes CanvasTexture painting appear broken.
-  if (!assetsRef.current) {
-    assetsRef.current = { body: makePaintAsset(), head: makePaintAsset() };
-  }
+  if (!assetsRef.current) assetsRef.current = { body: makePaintAsset(), head: makePaintAsset() };
   const assets = assetsRef.current;
-
   return (
     <group ref={playerRef} position={[0, 0, 4]}>
       <mesh userData={{ paintTarget: 'body' }} castShadow position={[0, 0.72, 0]}>
@@ -116,28 +110,47 @@ function Controller({ playerRef, paintMode, setLocked, setSample }) {
 
 function PaintController({ playerRef, assetsRef, paint }) {
   const { camera, gl } = useThree();
-  const raycaster=useMemo(()=>new THREE.Raycaster(),[]), pointer=useMemo(()=>new THREE.Vector2(),[]), lastUV=useRef(null);
-  const paintAt=event=>{
-    if(!paint.active||!assetsRef.current||!playerRef.current)return false;
+  const raycaster=useMemo(()=>new THREE.Raycaster(),[]), pointer=useMemo(()=>new THREE.Vector2(),[]);
+  const lastScreen=useRef(null), activePointer=useRef(null);
+
+  const raycastAtScreen=(clientX,clientY)=>{
+    if(!paint.active||!assetsRef.current||!playerRef.current)return null;
     const rect=gl.domElement.getBoundingClientRect();
-    pointer.x=((event.clientX-rect.left)/rect.width)*2-1; pointer.y=-((event.clientY-rect.top)/rect.height)*2+1;
+    pointer.x=((clientX-rect.left)/rect.width)*2-1; pointer.y=-((clientY-rect.top)/rect.height)*2+1;
     raycaster.setFromCamera(pointer,camera);
-    const hit=raycaster.intersectObject(playerRef.current,true).find(h=>h.object.userData.paintTarget&&h.uv);
+    return raycaster.intersectObject(playerRef.current,true).find(h=>h.object.userData.paintTarget&&h.uv)||null;
+  };
+
+  const dab=hit=>{
     if(!hit)return false;
     const asset=assetsRef.current[hit.object.userData.paintTarget]; if(!asset)return false;
-    const uv=hit.uv, x=THREE.MathUtils.clamp(uv.x,0,1)*asset.canvas.width, y=(1-THREE.MathUtils.clamp(uv.y,0,1))*asset.canvas.height;
-    const radius=paint.eraser?paint.size*1.8:paint.size;
-    asset.ctx.save(); asset.ctx.globalAlpha=paint.eraser?1:.95; asset.ctx.fillStyle=paint.eraser?BASE_COLOR:paint.color; asset.ctx.beginPath(); asset.ctx.arc(x,y,radius,0,Math.PI*2); asset.ctx.fill(); asset.ctx.restore();
-    if(lastUV.current&&lastUV.current.target===asset){const lx=lastUV.current.x,ly=lastUV.current.y,dx=x-lx,dy=y-ly,steps=Math.min(80,Math.ceil(Math.hypot(dx,dy)/Math.max(2,radius*.45)));for(let i=1;i<steps;i++){const t=i/steps;asset.ctx.beginPath();asset.ctx.arc(lx+dx*t,ly+dy*t,radius,0,Math.PI*2);asset.ctx.fill();}}
-    asset.texture.needsUpdate=true; lastUV.current={target:asset,x,y}; paint.onDab(); return true;
+    const x=THREE.MathUtils.clamp(hit.uv.x,0,1)*asset.canvas.width;
+    const y=(1-THREE.MathUtils.clamp(hit.uv.y,0,1))*asset.canvas.height;
+    const radius=paint.eraser?paint.size*1.8:paint.size, ctx=asset.ctx;
+    ctx.save(); ctx.globalAlpha=paint.eraser?1:.96; ctx.fillStyle=paint.eraser?BASE_COLOR:paint.color;
+    ctx.beginPath(); ctx.arc(x,y,radius,0,Math.PI*2); ctx.fill(); ctx.restore();
+    asset.texture.needsUpdate=true; paint.onDab(); return true;
   };
+
+  const strokeBetween=(x1,y1,x2,y2)=>{
+    const distance=Math.hypot(x2-x1,y2-y1), spacing=Math.max(3,paint.size*.16), steps=Math.min(140,Math.max(1,Math.ceil(distance/spacing)));
+    for(let i=0;i<=steps;i++){const t=i/steps; dab(raycastAtScreen(x1+(x2-x1)*t,y1+(y2-y1)*t));}
+  };
+
   useEffect(()=>{
-    const down=e=>{if(!paint.active||e.button!==0)return;const hit=paintAt(e);if(hit){e.preventDefault();e.stopPropagation();paint.dragging.current=true;gl.domElement.setPointerCapture?.(e.pointerId);}};
-    const move=e=>{if(!paint.active||!paint.dragging.current)return;paintAt(e);e.preventDefault();};
-    const up=e=>{paint.dragging.current=false;lastUV.current=null;try{gl.domElement.releasePointerCapture?.(e.pointerId);}catch{}};
-    gl.domElement.addEventListener('pointerdown',down);gl.domElement.addEventListener('pointermove',move);gl.domElement.addEventListener('pointerup',up);gl.domElement.addEventListener('pointercancel',up);
-    return()=>{gl.domElement.removeEventListener('pointerdown',down);gl.domElement.removeEventListener('pointermove',move);gl.domElement.removeEventListener('pointerup',up);gl.domElement.removeEventListener('pointercancel',up);};
-  });
+    const down=e=>{
+      if(!paint.active||e.button!==0)return;
+      const hit=raycastAtScreen(e.clientX,e.clientY); if(!hit)return;
+      e.preventDefault(); e.stopPropagation(); activePointer.current=e.pointerId; lastScreen.current={x:e.clientX,y:e.clientY}; paint.dragging.current=true; gl.domElement.setPointerCapture?.(e.pointerId); dab(hit);
+    };
+    const move=e=>{
+      if(!paint.active||!paint.dragging.current||activePointer.current!==e.pointerId||!lastScreen.current)return;
+      e.preventDefault(); e.stopPropagation(); strokeBetween(lastScreen.current.x,lastScreen.current.y,e.clientX,e.clientY); lastScreen.current={x:e.clientX,y:e.clientY};
+    };
+    const end=e=>{if(activePointer.current!==null&&e.pointerId!==activePointer.current)return; paint.dragging.current=false; activePointer.current=null; lastScreen.current=null; try{gl.domElement.releasePointerCapture?.(e.pointerId);}catch{}};
+    gl.domElement.addEventListener('pointerdown',down); gl.domElement.addEventListener('pointermove',move); gl.domElement.addEventListener('pointerup',end); gl.domElement.addEventListener('pointercancel',end);
+    return()=>{gl.domElement.removeEventListener('pointerdown',down); gl.domElement.removeEventListener('pointermove',move); gl.domElement.removeEventListener('pointerup',end); gl.domElement.removeEventListener('pointercancel',end);};
+  },[paint.active,paint.color,paint.size,paint.eraser,gl,camera]);
   return null;
 }
 
@@ -148,7 +161,7 @@ function PaintUI({ active,setActive,color,setColor,size,setSize,eraser,setEraser
       <div className="paint-tools">
         <div className="palette-wheel">{PALETTE.map((c,i)=>{const a=i/PALETTE.length*Math.PI*2-Math.PI/2,r=56;return <button key={c} className={`palette-dot ${color.toLowerCase()===c?'selected':''}`} style={{background:c,transform:`translate(${Math.cos(a)*r}px,${Math.sin(a)*r}px)`}} onClick={()=>{setColor(c);setEraser(false)}}/>})}<div className="palette-center" style={{background:eraser?BASE_COLOR:color}}><span>{eraser?'ERASE':'COLOR'}</span></div></div>
         <div className="tool-column"><label className="color-picker-button"><span className="tool-icon" style={{background:color}}/>COLOR PICKER<input type="color" value={color} onChange={e=>{setColor(e.target.value);setEraser(false)}}/></label><button className="tool-button" onClick={setColorFromSurface}><span className="eyedropper-icon">⌖</span>EYEDROPPER <small>E</small></button><button className={`tool-button ${eraser?'active':''}`} onClick={()=>setEraser(v=>!v)}><span className="eraser-icon">◐</span>ERASER</button></div>
-        <div className="brush-column"><div className="brush-label">BRUSH</div>{[8,18,34].map(s=><button key={s} className={`brush-button ${size===s?'active':''}`} onClick={()=>{setSize(s);setEraser(false)}}><span style={{width:Math.min(s,30),height:Math.min(s,30)}}/>{s===8?'S':s===18?'M':'L'}</button>)}</div>
+        <div className="brush-column"><div className="brush-label">BRUSH</div>{[18,42,80].map(s=><button key={s} className={`brush-button ${size===s?'active':''}`} onClick={()=>{setSize(s);setEraser(false)}}><span style={{width:Math.min(s,30),height:Math.min(s,30)}}/>{s===18?'S':s===42?'M':'L'}</button>)}</div>
       </div>
       <div className="selected-color-row"><span className="selected-color" style={{background:color}}/><span>SELECTED <b>{color.toUpperCase()}</b></span><span className="sampled-color" style={{background:sampleColor}}/><span>ENVIRONMENT SAMPLE</span></div>
     </div>
@@ -158,7 +171,7 @@ function PaintUI({ active,setActive,color,setColor,size,setSize,eraser,setEraser
 
 function App(){
   const playerRef=useRef(),assetsRef=useRef(null),dragging=useRef(false);
-  const [locked,setLocked]=useState(false),[paintMode,setPaintMode]=useState(false),[color,setColor]=useState('#9c724e'),[size,setSize]=useState(18),[eraser,setEraser]=useState(false),[sampleColor,setSampleColor]=useState(BASE_COLOR),[count,setCount]=useState(0);
+  const [locked,setLocked]=useState(false),[paintMode,setPaintMode]=useState(false),[color,setColor]=useState('#9c724e'),[size,setSize]=useState(42),[eraser,setEraser]=useState(false),[sampleColor,setSampleColor]=useState(BASE_COLOR),[count,setCount]=useState(0);
   useEffect(()=>{if(paintMode)document.exitPointerLock?.();},[paintMode]);
   const paint=useMemo(()=>({active:paintMode,color,size,eraser,dragging,onDab:()=>setCount(v=>v+1)}),[paintMode,color,size,eraser]);
   return <div className={`game ${paintMode?'painting-mode':''}`}>
