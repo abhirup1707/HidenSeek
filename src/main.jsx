@@ -9,6 +9,7 @@ const PLAYER_RADIUS = 0.42;
 const PLAYER_SPEED = 4.2;
 const ROOM_LIMIT_X = 11.25;
 const ROOM_LIMIT_Z = 9.25;
+const CAMO_KEY = 'KeyE';
 
 const PROP_COLLIDERS = [
   { x: -5, z: -5, hx: 1.5, hz: 0.75 },
@@ -49,15 +50,23 @@ function resolveCircleVsBox(position, box, radius) {
 }
 
 function Player({ playerRef }) {
+  const bodyMaterial = useRef();
+  const headMaterial = useRef();
+
+  useEffect(() => {
+    if (bodyMaterial.current) bodyMaterial.current.userData.isCamoMaterial = true;
+    if (headMaterial.current) headMaterial.current.userData.isCamoMaterial = true;
+  }, []);
+
   return (
-    <group ref={playerRef} position={[0, 0, 4]}>
+    <group ref={playerRef} position={[0, 0, 4]} userData={{ isPlayer: true }}>
       <mesh castShadow position={[0, 0.72, 0]}>
         <capsuleGeometry args={[0.38, 0.8, 8, 16]} />
-        <meshStandardMaterial color="#65c466" roughness={0.85} />
+        <meshStandardMaterial ref={bodyMaterial} color="#65c466" roughness={0.85} />
       </mesh>
       <mesh castShadow position={[0, 1.52, 0]}>
         <sphereGeometry args={[0.38, 20, 16]} />
-        <meshStandardMaterial color="#65c466" roughness={0.85} />
+        <meshStandardMaterial ref={headMaterial} color="#65c466" roughness={0.85} />
       </mesh>
       <mesh position={[-0.14, 1.6, -0.34]}>
         <sphereGeometry args={[0.075, 12, 12]} />
@@ -73,7 +82,13 @@ function Player({ playerRef }) {
 
 function Prop({ position, scale = [1, 1, 1], color = '#8b6545' }) {
   return (
-    <mesh castShadow receiveShadow position={position} scale={scale}>
+    <mesh
+      castShadow
+      receiveShadow
+      position={position}
+      scale={scale}
+      userData={{ camoSurface: true }}
+    >
       <boxGeometry args={[1, 1, 1]} />
       <meshStandardMaterial color={color} roughness={0.9} />
     </mesh>
@@ -83,24 +98,28 @@ function Prop({ position, scale = [1, 1, 1], color = '#8b6545' }) {
 function Room() {
   return (
     <group>
-      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh
+        receiveShadow
+        rotation={[-Math.PI / 2, 0, 0]}
+        userData={{ camoSurface: true }}
+      >
         <planeGeometry args={[24, 20]} />
         <meshStandardMaterial color="#6b6256" roughness={1} />
       </mesh>
 
-      <mesh receiveShadow position={[0, 4, -10]}>
+      <mesh receiveShadow position={[0, 4, -10]} userData={{ camoSurface: true }}>
         <boxGeometry args={[24, 8, 0.5]} />
         <meshStandardMaterial color="#b7a98e" roughness={0.95} />
       </mesh>
-      <mesh receiveShadow position={[-12, 4, 0]}>
+      <mesh receiveShadow position={[-12, 4, 0]} userData={{ camoSurface: true }}>
         <boxGeometry args={[0.5, 8, 20]} />
         <meshStandardMaterial color="#a9977b" roughness={0.95} />
       </mesh>
-      <mesh receiveShadow position={[12, 4, 0]}>
+      <mesh receiveShadow position={[12, 4, 0]} userData={{ camoSurface: true }}>
         <boxGeometry args={[0.5, 8, 20]} />
         <meshStandardMaterial color="#a9977b" roughness={0.95} />
       </mesh>
-      <mesh receiveShadow position={[0, 4, 10]}>
+      <mesh receiveShadow position={[0, 4, 10]} userData={{ camoSurface: true }}>
         <boxGeometry args={[24, 8, 0.5]} />
         <meshStandardMaterial color="#b7a98e" roughness={0.95} />
       </mesh>
@@ -115,20 +134,61 @@ function Room() {
   );
 }
 
-function ThirdPersonController({ playerRef, setLocked }) {
-  const { camera, gl } = useThree();
+function ThirdPersonController({ playerRef, setLocked, setCamo, setSampleColor }) {
+  const { camera, gl, scene } = useThree();
   const keys = useRef({});
   const yaw = useRef(0);
   const pitch = useRef(0.22);
   const smoothCamera = useRef(new THREE.Vector3(0, 3.2, 8));
   const targetCamera = useRef(new THREE.Vector3());
   const lookTarget = useRef(new THREE.Vector3());
+  const raycaster = useMemo(() => new THREE.Raycaster(), []);
+  const screenCenter = useMemo(() => new THREE.Vector2(0, 0), []);
   const [ready, setReady] = useState(false);
+
+  const sampleSurface = () => {
+    if (!ready || !playerRef.current) return;
+
+    raycaster.setFromCamera(screenCenter, camera);
+    const intersections = raycaster.intersectObjects(scene.children, true);
+    const hit = intersections.find((intersection) => {
+      let object = intersection.object;
+      while (object) {
+        if (object === playerRef.current) return false;
+        object = object.parent;
+      }
+      return intersection.object.userData.camoSurface === true;
+    });
+
+    if (!hit || !hit.object.material?.color) return;
+
+    const sampled = hit.object.material.color.clone();
+    const hex = `#${sampled.getHexString()}`;
+
+    playerRef.current.traverse((object) => {
+      if (object.isMesh && object.material?.userData?.isCamoMaterial) {
+        object.material.color.copy(sampled);
+      }
+    });
+
+    const current = playerRef.current.userData.camoColor || new THREE.Color('#65c466');
+    const maxDistance = Math.sqrt(3);
+    const distance = current.distanceTo(sampled);
+    const score = Math.round(100 - (distance / maxDistance) * 100);
+
+    playerRef.current.userData.camoColor = sampled.clone();
+    setSampleColor(hex);
+    setCamo(Math.max(0, Math.min(100, score)));
+  };
 
   useEffect(() => {
     const down = (event) => {
       keys.current[event.code] = true;
       if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space'].includes(event.code)) event.preventDefault();
+      if (event.code === CAMO_KEY) {
+        event.preventDefault();
+        sampleSurface();
+      }
     };
     const up = (event) => {
       keys.current[event.code] = false;
@@ -155,7 +215,7 @@ function ThirdPersonController({ playerRef, setLocked }) {
       document.removeEventListener('mousemove', mouse);
       document.removeEventListener('pointerlockchange', lockChange);
     };
-  }, [gl, setLocked]);
+  }, [camera, gl, playerRef, raycaster, scene, screenCenter, setCamo, setLocked, setSampleColor, ready]);
 
   useEffect(() => {
     const click = () => {
@@ -204,7 +264,6 @@ function ThirdPersonController({ playerRef, setLocked }) {
       player.position.z + Math.cos(yaw.current) * cameraDistance * cosPitch
     );
 
-    // Keep the third-person camera inside the room.
     targetCamera.current.x = THREE.MathUtils.clamp(targetCamera.current.x, -10.8, 10.8);
     targetCamera.current.z = THREE.MathUtils.clamp(targetCamera.current.z, -8.8, 8.8);
     targetCamera.current.y = THREE.MathUtils.clamp(targetCamera.current.y, 1.1, 7.5);
@@ -222,8 +281,12 @@ function ThirdPersonController({ playerRef, setLocked }) {
 function App() {
   const playerRef = useRef();
   const [locked, setLocked] = useState(false);
+  const [camoScore, setCamoScore] = useState(0);
+  const [sampleColor, setSampleColor] = useState('#65c466');
 
   const camera = useMemo(() => ({ position: [0, 3.2, 9], fov: 65, near: 0.1, far: 100 }), []);
+
+  const camoLabel = camoScore >= 90 ? 'EXCELLENT' : camoScore >= 70 ? 'GOOD' : camoScore >= 45 ? 'FAIR' : 'POOR';
 
   return (
     <div className="game">
@@ -241,21 +304,45 @@ function App() {
         <Sky sunPosition={[100, 20, 50]} turbidity={7} rayleigh={1.2} />
         <Room />
         <Player playerRef={playerRef} />
-        <ThirdPersonController playerRef={playerRef} setLocked={setLocked} />
+        <ThirdPersonController
+          playerRef={playerRef}
+          setLocked={setLocked}
+          setCamo={setCamoScore}
+          setSampleColor={setSampleColor}
+        />
       </Canvas>
 
       <div className="hud">
         <div className="brand">HIDENSEEK <span>3D</span></div>
-        <div className="objective">TEST ROOM · MOVEMENT PROTOTYPE</div>
+        <div className="objective">TEST ROOM · CAMOUFLAGE PROTOTYPE</div>
+
         {!locked && (
           <div className="start-card">
             <div className="start-title">ENTER THE ROOM</div>
             <div className="start-subtitle">Click anywhere to capture the mouse</div>
-            <div className="key-row"><span>W A S D</span> Move <span>MOUSE</span> Look</div>
+            <div className="key-row"><span>W A S D</span> Move <span>MOUSE</span> Look <span>E</span> Sample</div>
           </div>
         )}
+
+        {locked && (
+          <div className="camo-panel">
+            <div className="camo-heading">
+              <span>CAMOUFLAGE</span>
+              <strong>{camoScore}%</strong>
+            </div>
+            <div className="camo-bar">
+              <div className="camo-fill" style={{ width: `${camoScore}%` }} />
+            </div>
+            <div className="camo-status">
+              <span className="sample-swatch" style={{ background: sampleColor }} />
+              <span>{camoLabel}</span>
+              <span className="camo-help">E · SAMPLE SURFACE</span>
+            </div>
+          </div>
+        )}
+
         <div className="controls">
-          <b>WASD</b> move&nbsp;&nbsp; <b>MOUSE</b> look&nbsp;&nbsp; <b>ESC</b> release mouse
+          <b>WASD</b> move&nbsp;&nbsp; <b>MOUSE</b> look&nbsp;&nbsp; <b>E</b> sample&nbsp;&nbsp; <b>ESC</b> release
         </div>
       </div>
       <div className="crosshair">+</div>
